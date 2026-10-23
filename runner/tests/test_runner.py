@@ -419,12 +419,11 @@ def test_unexpected_exception_becomes_an_error_and_closes(patched):
     assert client.closed
 
 
-def test_raw_reply_commands_lose_their_redis_py_callbacks(patched):
-    client = ScriptedClient("embstr")
-    client.response_callbacks = {"OBJECT": object(), "COMMAND": object(), "GET": object()}
-    patched(client)
-    make().run_query("OBJECT ENCODING k", None)
-    assert list(client.response_callbacks) == ["GET"]
+def test_raw_reply_commands_lose_their_redis_py_callbacks():
+    client = runner_mod.new_client()
+    assert "OBJECT" not in client.response_callbacks
+    assert "COMMAND" not in client.response_callbacks
+    assert "GET" in client.response_callbacks or "HGETALL" in client.response_callbacks
 
 
 def test_connect_failure_in_constructor_is_an_error_tuple(monkeypatch):

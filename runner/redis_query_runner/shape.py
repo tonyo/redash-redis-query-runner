@@ -206,17 +206,7 @@ def shape(reply: Reply, args: Sequence[Any] = ()) -> Result:
         and isinstance(reply, (list, tuple))
         and all(isinstance(e, (list, tuple)) and len(e) == 2 for e in reply)
     ):
-        entries = [(i, _fields(f)) for i, f in reply]
-        fields: list[Any] = []
-        for _, f in entries:
-            fields += [k for k in f if k not in fields]
-        names = {
-            k: (f"{k}_1" if k == "id" else k) for k in fields
-        }  # a field named "id" must not clash
-        return _table(
-            ["id"] + [names[k] for k in fields],
-            [(i, *[f.get(k) for k in fields]) for i, f in entries],
-        )
+        return _union_table("id", [(i, _fields(f)) for i, f in reply])
 
     # HGETALL: one row, a typed column per field. Empty hash falls through.
     if cmd == ["HGETALL"]:

@@ -1,6 +1,8 @@
 """The Redash query runner for Redis: one Redis command per query, result as a table."""
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import redis
@@ -22,22 +24,17 @@ MAX_CONNECT_TIMEOUT = 30  # Test Connection is a 30 s job
 MAX_REQUEST_TIMEOUT = 3600
 
 
-def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
-    """Build the redis-py client. A seam: unit tests patch this to return a fake."""
-    return redis.Redis(**kwargs)
-
-
 # redis-py parses these replies with callbacks written for its own OBJECT/COMMAND methods, which
 # raise TypeError on a raw execute_command. Dropping them gives the raw reply for shape().
 _RAW_REPLY_COMMANDS = ("OBJECT", "COMMAND")
 
 
-def _execute(client: redis.Redis, args: list[str]) -> object:
-    callbacks = getattr(client, "response_callbacks", None)
-    if callbacks is not None:
-        for name in _RAW_REPLY_COMMANDS:
-            callbacks.pop(name, None)
-    return client.execute_command(*args)
+def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
+    """Build the redis-py client. A seam: unit tests patch this to return a fake."""
+    client = redis.Redis(**kwargs)
+    for name in _RAW_REPLY_COMMANDS:
+        client.response_callbacks.pop(name, None)
+    return client
 
 
 class ConfigError(ValueError):
@@ -188,39 +185,36 @@ class Redis(BaseQueryRunner):
 
     _HANDLED = (QueryError, ConfigError, redis.RedisError, UnicodeDecodeError)
 
+    @contextmanager
+    def _client(self) -> Generator[redis.Redis]:
+        client = self._connect()
+        try:
+            yield client
+        finally:
+            client.close()
+
     # -- BaseQueryRunner API
 
     def test_connection(self) -> None:
-        client = None
         try:
-            client = self._connect()
-            client.ping()
+            with self._client() as client:
+                client.ping()
         except self._HANDLED as e:
             raise Exception(self._describe(e)) from e
-        finally:
-            if client is not None:
-                client.close()
 
     def run_query(self, query: str, user: object) -> tuple[dict[str, Any] | None, str | None]:
         try:
             args = parse_query(query)
         except QueryError as e:
             return None, self._describe(e)
-        client = None
         try:
-            client = self._connect()
-            reply = _execute(client, args)
-            return shape(reply, args), None
+            with self._client() as client:
+                return shape(client.execute_command(*args), args), None
         except self._HANDLED as e:
             return None, self._describe(e)
-        except (
-            Exception
-        ) as e:  # a reply the client library or shaper cannot handle: report, don't crash
+        except Exception as e:  # a reply the client library or shaper cannot handle: don't crash
             logger.exception("Redis reply could not be read for %s", args[0])
             return None, f"Could not read the reply to {args[0].upper()} ({type(e).__name__}: {e})"
-        finally:
-            if client is not None:
-                client.close()
 
 
 register(Redis)
