@@ -1,6 +1,14 @@
-# Tests run in containers (see tests/Dockerfile), so the host needs only docker
-# compose; there is nothing to pin under [tools].
+# Tests run in containers (see tests/Dockerfile) and need only docker compose.
+# Formatting, linting and type checks run on the host with the tools pinned here.
+[settings]
+minimum_release_age = "7d"
+lockfile = true
+
 [tools]
+pre-commit = "4.6.0"
+python = "3.13.16"
+ruff = "0.17.1"
+ty = "0.0.89"
 
 [tasks.test]
 description = "Run all tests (unit + integration) in the test container"
@@ -14,13 +22,21 @@ run = "docker compose --profile test run --rm --build test -m 'not integration'"
 description = "Run integration tests against data-redis, logical DB 15"
 run = "docker compose --profile test run --rm --build test -m integration"
 
+[tasks.format]
+description = "Format Python code with ruff"
+run = "ruff format ."
+
 [tasks.lint]
-description = "Syntax-check every .py under runner/ in the test container"
-# compile() in memory: /extensions is read-only, so compileall could not write .pyc files.
-run = """
-docker compose --profile test run --rm --build --entrypoint python test -c \
-  "import pathlib; [compile(p.read_text(), str(p), 'exec') for p in pathlib.Path('/extensions').rglob('*.py')]"
-"""
+description = "Check formatting and lint Python code with ruff"
+run = ["ruff format --check .", "ruff check ."]
+
+[tasks.typecheck]
+description = "Type-check the runner package with ty"
+run = "ty check"
+
+[tasks.check]
+description = "Run lint and typecheck"
+depends = ["lint", "typecheck"]
 
 [tasks.demo]
 description = "Idempotent demo: create the Redis data source, queries, bar chart and dashboard via the Redash API (needs `docker compose up -d` and the seed)"

@@ -1,0 +1,20 @@
+# Tool settings only: this repo is not an installable Python package.
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+# Full type hints are required for the runner package only.
+"runner/tests/*" = ["ANN"]
+"demo/*" = ["ANN"]
+
+[tool.ty.src]
+include = ["runner/redis_query_runner"]
+
+[tool.ty.rules]
+# redash ships no type information and is only importable inside the Redash image.
+unresolved-import = "ignore"
