@@ -1,8 +1,9 @@
 """The Redash query runner for Redis: one Redis command per query, result as a table."""
+
 import logging
+from typing import Any
 
 import redis
-
 from redash.query_runner import BaseQueryRunner, register
 
 from .parser import QueryError, parse_query
@@ -17,7 +18,7 @@ CONNECT_TIMEOUT = 5  # seconds: a bad host fails fast, well inside Test Connecti
 COMMAND_TIMEOUT = 30  # seconds per command
 
 
-def new_client(**kwargs):
+def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
     """Build the redis-py client. A seam: unit tests patch this to return a fake."""
     return redis.Redis(**kwargs)
 
@@ -26,8 +27,11 @@ class ConfigError(ValueError):
     """The data source configuration holds a value that cannot be used."""
 
 
-def _as_int(name, value, default, minimum, maximum):
-    """Config value -> int in [minimum, maximum]. Unset/blank -> default; anything else unusable raises."""
+def _as_int(name: str, value: object, default: int, minimum: int, maximum: int) -> int:
+    """Config value -> int in [minimum, maximum].
+
+    Unset/blank -> default; anything else unusable raises.
+    """
     if value is None or (isinstance(value, str) and not value.strip()):
         return default
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
@@ -47,20 +51,20 @@ class Redis(BaseQueryRunner):
     should_annotate_query = False  # a /* ... */ prefix would be sent to Redis as the command
     noop_query = "PING"
 
-    def __init__(self, configuration):
+    def __init__(self, configuration: dict[str, Any]) -> None:
         super().__init__(configuration)
         self.syntax = "text"
 
     @classmethod
-    def name(cls):
+    def name(cls) -> str:
         return "Redis"
 
     @classmethod
-    def type(cls):
+    def type(cls) -> str:
         return "redis"
 
     @classmethod
-    def configuration_schema(cls):
+    def configuration_schema(cls) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -76,25 +80,25 @@ class Redis(BaseQueryRunner):
 
     # -- configuration, with defaults applied here (schema defaults are only form placeholders)
 
-    def _host(self):
+    def _host(self) -> str:
         host = self.configuration.get("host")
         if host is not None and not isinstance(host, str):
             raise ConfigError(f"Invalid host: {host!r} is not text")
         return (host or "").strip() or DEFAULT_HOST
 
-    def _port(self):
+    def _port(self) -> int:
         return _as_int("port", self.configuration.get("port"), DEFAULT_PORT, 1, 65535)
 
-    def _db(self):
+    def _db(self) -> int:
         return _as_int("database index", self.configuration.get("db"), DEFAULT_DB, 0, 2**31 - 1)
 
-    def _password(self):
+    def _password(self) -> str | None:
         password = self.configuration.get("password")
         if password is not None and not isinstance(password, str):
             raise ConfigError("Invalid password: not text")
         return password or None
 
-    def _connect(self):
+    def _connect(self) -> redis.Redis:
         return new_client(
             host=self._host(),
             port=self._port(),
@@ -107,7 +111,7 @@ class Redis(BaseQueryRunner):
 
     # -- errors
 
-    def _describe(self, e):
+    def _describe(self, e: Exception) -> str:
         """An exception -> one clear line for the user (never containing the password)."""
         if isinstance(e, (QueryError, ConfigError)):
             return str(e)
@@ -135,7 +139,7 @@ class Redis(BaseQueryRunner):
 
     # -- BaseQueryRunner API
 
-    def test_connection(self):
+    def test_connection(self) -> None:
         client = None
         try:
             client = self._connect()
@@ -146,7 +150,7 @@ class Redis(BaseQueryRunner):
             if client is not None:
                 client.close()
 
-    def run_query(self, query, user):
+    def run_query(self, query: str, user: object) -> tuple[dict[str, Any] | None, str | None]:
         try:
             args = parse_query(query)
         except QueryError as e:

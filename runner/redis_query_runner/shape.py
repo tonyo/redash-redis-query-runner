@@ -8,8 +8,11 @@ needed because a few replies can only be interpreted by command name.
 
 Returns `{"columns": [{name, friendly_name, type}], "rows": [{name: value}]}`.
 """
+
 import math
 import re
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from redash.query_runner import TYPE_BOOLEAN, TYPE_FLOAT, TYPE_INTEGER, TYPE_STRING
 
@@ -20,8 +23,13 @@ _FLOAT_RE = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?\Z")
 _SCALARS = (str, int, float, bool)
 _CONTAINERS = (list, tuple, dict, set, frozenset)
 
+Row = dict[str, Any]
+Result = dict[str, Any]
+# redis-py replies are untyped: str, int, float, bool, None, list, tuple, dict, set.
+Reply = Any
 
-def _cell(v):
+
+def _cell(v: Reply) -> Reply:
     """Any value -> a JSON-safe cell: scalars stay, containers -> repr."""
     if isinstance(v, bytes):
         return v.decode("utf-8", "replace")
@@ -32,7 +40,7 @@ def _cell(v):
     return repr(v)
 
 
-def _parse_number(s):
+def _parse_number(s: str) -> int | float | None:
     """Strictly parse a string to int or finite float; None if it is text."""
     if _INT_RE.match(s):
         return int(s)
@@ -44,22 +52,25 @@ def _parse_number(s):
     return None
 
 
-def _coerce_column(rows, name):
+def _coerce_column(rows: list[Row], name: str) -> None:
     """Convert a column of numeric strings, only if every non-null value parses."""
     idx = [i for i, r in enumerate(rows) if r[name] is not None]
     vals = [rows[i][name] for i in idx]
     if not vals or not all(isinstance(v, str) for v in vals):
         return
-    parsed = [_parse_number(v) for v in vals]
-    if any(p is None for p in parsed):
-        return
+    parsed: list[int | float] = []
+    for v in vals:
+        number = _parse_number(v)
+        if number is None:
+            return
+        parsed.append(number)
     if any(isinstance(p, float) for p in parsed):
         parsed = [float(p) for p in parsed]  # int + float column -> all float
-    for i, p in zip(idx, parsed):
+    for i, p in zip(idx, parsed, strict=True):
         rows[i][name] = p
 
 
-def _type_of(rows, name):
+def _type_of(rows: list[Row], name: str) -> str:
     vals = [r[name] for r in rows if r[name] is not None]
     if not vals:
         return TYPE_STRING
@@ -72,9 +83,9 @@ def _type_of(rows, name):
     return TYPE_STRING
 
 
-def _table(names, raw_rows):
+def _table(names: Iterable[Any], raw_rows: Iterable[Iterable[Any]]) -> Result:
     names = [str(n) for n in names]
-    rows = [dict(zip(names, [_cell(c) for c in r])) for r in raw_rows]
+    rows = [dict(zip(names, [_cell(c) for c in r], strict=False)) for r in raw_rows]
     for n in names:
         _coerce_column(rows, n)
         if _type_of(rows, n) == TYPE_STRING:  # mixed column: uniform strings
@@ -85,15 +96,15 @@ def _table(names, raw_rows):
     return {"columns": cols, "rows": rows}
 
 
-def _pairs(flat):
-    return list(zip(flat[::2], flat[1::2]))
+def _pairs(flat: Sequence[Any]) -> list[tuple[Any, Any]]:
+    return list(zip(flat[::2], flat[1::2], strict=False))
 
 
-def _is_flat(reply):
+def _is_flat(reply: Reply) -> bool:
     return isinstance(reply, list) and not any(isinstance(x, _CONTAINERS) for x in reply)
 
 
-def _fields(f):
+def _fields(f: Reply) -> dict[Any, Any]:
     """Stream entry fields: dict, or a flat [k, v, ...] list; None -> {}."""
     if f is None:
         return {}
@@ -102,7 +113,7 @@ def _fields(f):
     return dict(_pairs(list(f)))
 
 
-def shape(reply, args=()):
+def shape(reply: Reply, args: Sequence[Any] = ()) -> Result:
     words = [str(a).upper() for a in args]
     cmd = words[:1]
     cmd2 = words[:2]
@@ -123,18 +134,27 @@ def shape(reply, args=()):
         return _table(["key", "value"], _pairs(reply))
 
     # SCAN / SSCAN: (cursor, [keys]) -> keys as rows, cursor dropped
-    if cmd in (["SCAN"], ["SSCAN"]) and isinstance(reply, (list, tuple)) and len(reply) == 2 \
-            and isinstance(reply[1], (list, tuple)):
+    if (
+        cmd in (["SCAN"], ["SSCAN"])
+        and isinstance(reply, (list, tuple))
+        and len(reply) == 2
+        and isinstance(reply[1], (list, tuple))
+    ):
         return _table(["value"], [(k,) for k in reply[1]])
 
     # streams: [(id, {field: value})] -> id + a column per field (first-seen order)
-    if cmd in (["XRANGE"], ["XREVRANGE"]) and isinstance(reply, (list, tuple)) \
-            and all(isinstance(e, (list, tuple)) and len(e) == 2 for e in reply):
+    if (
+        cmd in (["XRANGE"], ["XREVRANGE"])
+        and isinstance(reply, (list, tuple))
+        and all(isinstance(e, (list, tuple)) and len(e) == 2 for e in reply)
+    ):
         entries = [(i, _fields(f)) for i, f in reply]
-        fields = []
+        fields: list[Any] = []
         for _, f in entries:
             fields += [k for k in f if k not in fields]
-        names = {k: (f"{k}_1" if k == "id" else k) for k in fields}  # a field named "id" must not clash
+        names = {
+            k: (f"{k}_1" if k == "id" else k) for k in fields
+        }  # a field named "id" must not clash
         return _table(
             ["id"] + [names[k] for k in fields],
             [(i, *[f.get(k) for k in fields]) for i, f in entries],

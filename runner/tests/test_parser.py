@@ -1,5 +1,4 @@
 import pytest
-
 from redis_query_runner.parser import QueryError, parse_query
 
 LONG = "x" * 100_000
@@ -24,10 +23,10 @@ LONG = "x" * 100_000
         # quoting
         ('SET k "hello world"', ["SET", "k", "hello world"]),
         ("SET k 'hello world'", ["SET", "k", "hello world"]),
-        ("SET k \"it's\"", ["SET", "k", "it's"]),
+        ('SET k "it\'s"', ["SET", "k", "it's"]),
         ("SET k 'say \"hi\"'", ["SET", "k", 'say "hi"']),
-        ("SET k pre\"fix ed\"", ["SET", "k", "prefix ed"]),
-        ("SET \"my key\" v", ["SET", "my key", "v"]),
+        ('SET k pre"fix ed"', ["SET", "k", "prefix ed"]),
+        ('SET "my key" v', ["SET", "my key", "v"]),
         # empty-string args
         ('SET k ""', ["SET", "k", ""]),
         ("SET k ''", ["SET", "k", ""]),
@@ -100,13 +99,13 @@ def test_multi_line_rejected(text):
     ['SET k "abc', "SET k 'abc", 'SET k "', "SET k '", "SET k \"a'b", "SET k 'a\"b", 'SET k "a\\"'],
 )
 def test_unbalanced_quotes_rejected(text):
-    with pytest.raises(QueryError, match="(?i)quot"):
+    with pytest.raises(QueryError, match=r"(?i)quot"):
         parse_query(text)
 
 
 @pytest.mark.parametrize("text", ["SET k abc\\", "SET k \\"])
 def test_trailing_backslash_rejected(text):
-    with pytest.raises(QueryError, match="(?i)escape"):
+    with pytest.raises(QueryError, match=r"(?i)escape"):
         parse_query(text)
 
 

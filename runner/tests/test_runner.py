@@ -1,9 +1,10 @@
 """Unit tests for the Redis runner: a fake client against the real BaseQueryRunner."""
+
 import json
 
 import pytest
 import redis
-
+import redis_query_runner
 from redash.query_runner import (
     TYPE_FLOAT,
     TYPE_INTEGER,
@@ -12,8 +13,6 @@ from redash.query_runner import (
     query_runners,
 )
 from redash.utils import json_dumps
-
-import redis_query_runner
 from redis_query_runner import runner as runner_mod
 from redis_query_runner.runner import Redis
 
@@ -202,7 +201,7 @@ def test_set_then_get_with_fake_redis(monkeypatch, fake_redis):
 def test_command_args_reach_client_as_parsed(patched):
     client = ScriptedClient("x")
     patched(client)
-    make().run_query("  set   'a b' \"c\\\"d\"  \n", None)
+    make().run_query('  set   \'a b\' "c\\"d"  \n', None)
     assert client.calls == [("set", "a b", 'c"d')]
 
 
@@ -248,12 +247,26 @@ def test_trailing_blank_lines_ok(patched):
         ("LRANGE l 0 -1", [], ["value"], []),
         ("SMEMBERS s", {"b", "a"}, ["value"], [{"value": "a"}, {"value": "b"}]),
         ("HGETALL h", {"n": "1", "s": "x"}, ["n", "s"], [{"n": 1, "s": "x"}]),
-        ("ZRANGE z 0 -1 WITHSCORES", [("a", 1.0), ("b", 2.5)], ["member", "score"],
-         [{"member": "a", "score": 1.0}, {"member": "b", "score": 2.5}]),
+        (
+            "ZRANGE z 0 -1 WITHSCORES",
+            [("a", 1.0), ("b", 2.5)],
+            ["member", "score"],
+            [{"member": "a", "score": 1.0}, {"member": "b", "score": 2.5}],
+        ),
         ("SCAN 0", ("0", ["k1", "k2"]), ["value"], [{"value": "k1"}, {"value": "k2"}]),
         ("XRANGE s - +", [("1-0", {"f": "v"})], ["id", "f"], [{"id": "1-0", "f": "v"}]),
-        ("INFO", {"redis_mode": "standalone"}, ["key", "value"], [{"key": "redis_mode", "value": "standalone"}]),
-        ("CONFIG GET maxmemory", {"maxmemory": "0"}, ["key", "value"], [{"key": "maxmemory", "value": 0}]),
+        (
+            "INFO",
+            {"redis_mode": "standalone"},
+            ["key", "value"],
+            [{"key": "redis_mode", "value": "standalone"}],
+        ),
+        (
+            "CONFIG GET maxmemory",
+            {"maxmemory": "0"},
+            ["key", "value"],
+            [{"key": "maxmemory", "value": 0}],
+        ),
         ("EXISTS k", 0, ["value"], [{"value": 0}]),
         ("ZSCORE z m", 1.5, ["value"], [{"value": 1.5}]),
         ("GET k", "", ["value"], [{"value": ""}]),
@@ -274,16 +287,29 @@ def test_column_types(patched):
     patched(ScriptedClient({"i": "1", "f": "1.5", "s": "x"}))
     data, _ = make().run_query("HGETALL h", None)
     assert {c["name"]: c["type"] for c in data["columns"]} == {
-        "i": TYPE_INTEGER, "f": TYPE_FLOAT, "s": TYPE_STRING,
+        "i": TYPE_INTEGER,
+        "f": TYPE_FLOAT,
+        "s": TYPE_STRING,
     }
 
 
 @pytest.mark.parametrize(
     "reply",
     [
-        None, "x", 1, 1.5, True, ["a", 1], {"a": "1"}, {"a", "b"},
-        ("0", ["k"]), [("a", float("inf"))], [["nested", ["x"]]], b"raw",
-        {"big": 10**30}, [float("nan")],
+        None,
+        "x",
+        1,
+        1.5,
+        True,
+        ["a", 1],
+        {"a": "1"},
+        {"a", "b"},
+        ("0", ["k"]),
+        [("a", float("inf"))],
+        [["nested", ["x"]]],
+        b"raw",
+        {"big": 10**30},
+        [float("nan")],
     ],
 )
 def test_result_is_json_serializable(patched, reply):

@@ -1,4 +1,5 @@
 """Shared fixtures: a fake Redis client (unit) and a real, flushed DB 15 (integration)."""
+
 import os
 
 import pytest

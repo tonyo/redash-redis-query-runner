@@ -1,4 +1,5 @@
 """Parse the text of a Redash query into the argument list of one Redis command."""
+
 import shlex
 
 

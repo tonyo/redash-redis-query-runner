@@ -1,11 +1,10 @@
 """Integration tests: the runner against the real data-redis (logical DB 15)."""
+
 import json
 import os
 
 import pytest
-
 from redash.utils import json_dumps
-
 from redis_query_runner.runner import Redis
 
 pytestmark = pytest.mark.integration
@@ -215,5 +214,5 @@ def test_test_connection_refused():
 
 
 def test_test_connection_wrong_password():
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match=r"(?i)auth|password"):
         Redis({"host": HOST, "port": PORT, "password": "nope"}).test_connection()

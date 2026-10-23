@@ -4,6 +4,7 @@
 Stdlib only. Run via `mise run demo`. Reads ADMIN_PASSWORD from ./.env (never printed).
 Env overrides: REDASH_URL (default http://127.0.0.1:5000), ADMIN_EMAIL.
 """
+
 import http.cookiejar
 import json
 import os
@@ -75,6 +76,7 @@ def login():
     except urllib.error.HTTPError as e:
         fail(f"login failed: HTTP {e.code}")
     csrf = next((c.value for c in jar if c.name == "csrf_token"), "")
+
     def get(path):
         req = urllib.request.Request(f"{BASE}{path}", headers={"X-CSRFToken": csrf})
         try:
@@ -114,11 +116,16 @@ def api(method, path, body=None, ok_errors=()):
 
 # ---- data source ---------------------------------------------------------
 
+
 def ensure_data_source():
     opts = {"host": "data-redis", "port": 6379, "db": 0}
     found = next((d for d in api("GET", "/api/data_sources") if d["name"] == DS_NAME), None)
     if found:
-        ds = api("POST", f"/api/data_sources/{found['id']}", {"name": DS_NAME, "type": "redis", "options": opts})
+        ds = api(
+            "POST",
+            f"/api/data_sources/{found['id']}",
+            {"name": DS_NAME, "type": "redis", "options": opts},
+        )
         print(f"  data source '{DS_NAME}' exists (id {ds['id']})")
     else:
         ds = api("POST", "/api/data_sources", {"name": DS_NAME, "type": "redis", "options": opts})
@@ -131,15 +138,28 @@ def ensure_data_source():
 
 # ---- queries -------------------------------------------------------------
 
+
 def ensure_query(ds_id, name, text, description=""):
     existing = {q["name"]: q for q in api("GET", "/api/queries?page_size=250")["results"]}
     if name in existing:
-        q = api("POST", f"/api/queries/{existing[name]['id']}",
-                {"query": text, "data_source_id": ds_id, "description": description})
+        q = api(
+            "POST",
+            f"/api/queries/{existing[name]['id']}",
+            {"query": text, "data_source_id": ds_id, "description": description},
+        )
         print(f"  query '{name}' exists (id {q['id']})")
     else:
-        q = api("POST", "/api/queries",
-                {"name": name, "query": text, "data_source_id": ds_id, "description": description, "options": {}})
+        q = api(
+            "POST",
+            "/api/queries",
+            {
+                "name": name,
+                "query": text,
+                "data_source_id": ds_id,
+                "description": description,
+                "options": {},
+            },
+        )
         print(f"  created query '{name}' (id {q['id']})")
     return api("GET", f"/api/queries/{q['id']}")
 
@@ -178,10 +198,13 @@ def types(data):
 
 CHART_OPTIONS = {
     "globalSeriesType": "column",
-    "sortX": False,  # keep result order (ZRANGE is ascending by score); True would sort by region name
+    "sortX": False,  # keep result order (ascending score); True sorts by region name
     "legend": {"enabled": False},
     "xAxis": {"type": "-", "labels": {"enabled": True}, "title": {"text": "Region"}},
-    "yAxis": [{"type": "linear", "title": {"text": "Revenue"}}, {"type": "linear", "opposite": True}],
+    "yAxis": [
+        {"type": "linear", "title": {"text": "Revenue"}},
+        {"type": "linear", "opposite": True},
+    ],
     "series": {"stacking": None, "error_y": {"type": "data", "visible": True}},
     "seriesOptions": {"score": {"type": "column", "yAxis": 0, "zIndex": 0, "index": 0}},
     "columnMapping": {"member": "x", "score": "y"},
@@ -197,7 +220,13 @@ CHART_OPTIONS = {
 def ensure_chart(query):
     name = "Revenue by region"
     vis = next((v for v in query["visualizations"] if v["name"] == name), None)
-    body = {"query_id": query["id"], "type": "CHART", "name": name, "description": "", "options": CHART_OPTIONS}
+    body = {
+        "query_id": query["id"],
+        "type": "CHART",
+        "name": name,
+        "description": "",
+        "options": CHART_OPTIONS,
+    }
     if vis:
         vis = api("POST", f"/api/visualizations/{vis['id']}", body)
         print(f"  chart '{name}' exists (id {vis['id']})")
@@ -214,7 +243,14 @@ def table_vis(query):
 
 
 def ensure_dashboard():
-    found = next((d for d in api("GET", "/api/dashboards?page_size=250")["results"] if d["name"] == DASH_NAME), None)
+    found = next(
+        (
+            d
+            for d in api("GET", "/api/dashboards?page_size=250")["results"]
+            if d["name"] == DASH_NAME
+        ),
+        None,
+    )
     if not found:
         found = api("POST", "/api/dashboards", {"name": DASH_NAME})
         print(f"  created dashboard '{DASH_NAME}'")
@@ -227,10 +263,19 @@ def ensure_widget(dash, vis_id, pos):
     present = {w["visualization"]["id"] for w in dash["widgets"] if w.get("visualization")}
     if vis_id in present:
         return False
-    api("POST", "/api/widgets", {
-        "dashboard_id": dash["id"], "visualization_id": vis_id, "text": "", "width": 1,
-        "options": {"position": {"col": pos[0], "row": pos[1], "sizeX": pos[2], "sizeY": pos[3]}},
-    })
+    api(
+        "POST",
+        "/api/widgets",
+        {
+            "dashboard_id": dash["id"],
+            "visualization_id": vis_id,
+            "text": "",
+            "width": 1,
+            "options": {
+                "position": {"col": pos[0], "row": pos[1], "sizeX": pos[2], "sizeY": pos[3]}
+            },
+        },
+    )
     return True
 
 
@@ -243,7 +288,9 @@ def main():
     ds_id = ensure_data_source()
 
     print("Queries")
-    q_zset = ensure_query(ds_id, PREFIX + "revenue by region", "ZRANGE sales:revenue_by_region 0 -1 WITHSCORES")
+    q_zset = ensure_query(
+        ds_id, PREFIX + "revenue by region", "ZRANGE sales:revenue_by_region 0 -1 WITHSCORES"
+    )
     q_hash = ensure_query(ds_id, PREFIX + "product 1001", "HGETALL product:1001")
     q_list = ensure_query(ds_id, PREFIX + "recent orders", "LRANGE recent:orders 0 -1")
     q_strm = ensure_query(ds_id, PREFIX + "events", "XRANGE events - +")
@@ -253,11 +300,23 @@ def main():
     d = execute(q_zset)
     t = types(d)
     check(t.get("member") == "string", f"zset member column is string (got {t.get('member')})")
-    check(t.get("score") in ("float", "integer"), f"zset score column is numeric (got {t.get('score')})")
+    check(
+        t.get("score") in ("float", "integer"),
+        f"zset score column is numeric (got {t.get('score')})",
+    )
     scores = [r["score"] for r in d["rows"]]
-    check(all(isinstance(s, (int, float)) and not isinstance(s, bool) for s in scores), "score values are JSON numbers")
-    check(len(scores) == 6 and scores == sorted(scores), f"scores come back in numeric ascending order ({len(scores)} rows)")
-    check(sorted(scores, key=str) != scores, "numeric order differs from lexical order (so types matter)")
+    check(
+        all(isinstance(s, (int, float)) and not isinstance(s, bool) for s in scores),
+        "score values are JSON numbers",
+    )
+    check(
+        len(scores) == 6 and scores == sorted(scores),
+        f"scores come back in numeric ascending order ({len(scores)} rows)",
+    )
+    check(
+        sorted(scores, key=str) != scores,
+        "numeric order differs from lexical order (so types matter)",
+    )
     check(sorted(scores, reverse=True)[0] == 12000, "largest score is 12000")
 
     d = execute(q_hash)
@@ -267,7 +326,10 @@ def main():
     check("stock" in t and "price" in t, f"hash has stock and price columns (columns: {cols})")
     check(t["stock"] == "integer", f"stock is integer (got {t['stock']})")
     check(t["price"] == "float", f"price is float (got {t['price']})")
-    check(d["rows"][0]["stock"] == 42 and d["rows"][0]["price"] == 249.99, "stock=42 and price=249.99 as numbers")
+    check(
+        d["rows"][0]["stock"] == 42 and d["rows"][0]["price"] == 249.99,
+        "stock=42 and price=249.99 as numbers",
+    )
 
     d = execute(q_list)
     check(len(d["rows"]) == 3, "list query returns 3 rows")
@@ -277,8 +339,13 @@ def main():
     check(len(d["rows"]) > 0, "INFO server returns rows")
 
     print("Failing query")
-    _, err = run_result("/api/query_results", {"data_source_id": ds_id, "query": "NOSUCHCMD", "max_age": 0})
-    check(err and "Redis error" in err and "unknown command" in err.lower(), "NOSUCHCMD surfaces the Redis error text")
+    _, err = run_result(
+        "/api/query_results", {"data_source_id": ds_id, "query": "NOSUCHCMD", "max_age": 0}
+    )
+    check(
+        err and "Redis error" in err and "unknown command" in err.lower(),
+        "NOSUCHCMD surfaces the Redis error text",
+    )
 
     print("Visualizations")
     chart_id = ensure_chart(q_zset)
@@ -299,7 +366,10 @@ def main():
     dash = api("GET", f"/api/dashboards/{dash['id']}")
     check(not dash["is_draft"], "dashboard is published")
     vis_ids = [w["visualization"]["id"] for w in dash["widgets"] if w.get("visualization")]
-    check(len(vis_ids) == len(set(vis_ids)) == len(layout), f"dashboard has {len(layout)} widgets, no duplicates")
+    check(
+        len(vis_ids) == len(set(vis_ids)) == len(layout),
+        f"dashboard has {len(layout)} widgets, no duplicates",
+    )
     check(chart_id in vis_ids, "dashboard contains the bar chart")
 
     print(f"\nDashboard: {BASE}/dashboards/{dash['id']}-{dash['slug']}")

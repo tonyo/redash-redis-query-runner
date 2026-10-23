@@ -1,10 +1,10 @@
 """Unit tests for shape(): pure, no Redis needed."""
-import pytest
 
+import pytest
 from redash.query_runner import TYPE_BOOLEAN, TYPE_FLOAT, TYPE_INTEGER, TYPE_STRING
 from redis_query_runner.shape import shape
 
-I, F, S, B = TYPE_INTEGER, TYPE_FLOAT, TYPE_STRING, TYPE_BOOLEAN
+INT, F, S, B = TYPE_INTEGER, TYPE_FLOAT, TYPE_STRING, TYPE_BOOLEAN
 
 
 def cols(result):
@@ -17,23 +17,28 @@ def values(result, name="value"):
 
 def test_result_shape_has_friendly_name():
     r = shape("x")
-    assert r == {"columns": [{"name": "value", "friendly_name": "value", "type": S}],
-                 "rows": [{"value": "x"}]}
+    assert r == {
+        "columns": [{"name": "value", "friendly_name": "value", "type": S}],
+        "rows": [{"value": "x"}],
+    }
 
 
 # --- scalars, nil, bool -------------------------------------------------------
-@pytest.mark.parametrize("reply, args, expected, typ", [
-    ("hello", ("GET", "k"), "hello", S),
-    ("", ("GET", "k"), "", S),
-    ("42", ("GET", "k"), 42, I),
-    (42, ("INCR", "k"), 42, I),
-    (-7, ("DECR", "k"), -7, I),
-    (3.5, ("ZSCORE", "z", "m"), 3.5, F),
-    ("3.5", ("GET", "k"), 3.5, F),
-    ("héllo ✓ 日本", ("GET", "k"), "héllo ✓ 日本", S),
-    ("x" * 100_000, ("GET", "k"), "x" * 100_000, S),
-    (b"raw", ("GET", "k"), "raw", S),
-])
+@pytest.mark.parametrize(
+    "reply, args, expected, typ",
+    [
+        ("hello", ("GET", "k"), "hello", S),
+        ("", ("GET", "k"), "", S),
+        ("42", ("GET", "k"), 42, INT),
+        (42, ("INCR", "k"), 42, INT),
+        (-7, ("DECR", "k"), -7, INT),
+        (3.5, ("ZSCORE", "z", "m"), 3.5, F),
+        ("3.5", ("GET", "k"), 3.5, F),
+        ("héllo ✓ 日本", ("GET", "k"), "héllo ✓ 日本", S),
+        ("x" * 100_000, ("GET", "k"), "x" * 100_000, S),
+        (b"raw", ("GET", "k"), "raw", S),
+    ],
+)
 def test_scalar(reply, args, expected, typ):
     r = shape(reply, args)
     assert cols(r) == [("value", typ)]
@@ -72,21 +77,24 @@ def test_true_inside_list_is_not_rewritten():
 
 
 # --- strict number typing ----------------------------------------------------
-@pytest.mark.parametrize("text, expected, typ", [
-    ("0", 0, I),
-    ("5", 5, I),
-    ("-5", -5, I),
-    ("-12345", -12345, I),
-    ("123456789012345678901234567890", 123456789012345678901234567890, I),
-    ("-123456789012345678901234567890", -123456789012345678901234567890, I),
-    ("3.14", 3.14, F),
-    ("-0.5", -0.5, F),
-    ("0.0", 0.0, F),
-    ("1e5", 100000.0, F),
-    ("1E5", 100000.0, F),
-    ("2.5e-3", 0.0025, F),
-    ("-1e+2", -100.0, F),
-])
+@pytest.mark.parametrize(
+    "text, expected, typ",
+    [
+        ("0", 0, INT),
+        ("5", 5, INT),
+        ("-5", -5, INT),
+        ("-12345", -12345, INT),
+        ("123456789012345678901234567890", 123456789012345678901234567890, INT),
+        ("-123456789012345678901234567890", -123456789012345678901234567890, INT),
+        ("3.14", 3.14, F),
+        ("-0.5", -0.5, F),
+        ("0.0", 0.0, F),
+        ("1e5", 100000.0, F),
+        ("1E5", 100000.0, F),
+        ("2.5e-3", 0.0025, F),
+        ("-1e+2", -100.0, F),
+    ],
+)
 def test_numeric_strings_are_typed(text, expected, typ):
     r = shape(text, ("GET", "k"))
     assert cols(r) == [("value", typ)]
@@ -94,11 +102,43 @@ def test_numeric_strings_are_typed(text, expected, typ):
     assert type(values(r)[0]) is type(expected)
 
 
-@pytest.mark.parametrize("text", [
-    "007", "00", "-007", "+5", "+0", " 12 ", " 12", "12 ", "1_000", "-0", "-0.0x",
-    "nan", "NaN", "inf", "-inf", "Infinity", "1e999", "-1e999", "1.", ".5", "0x10",
-    "1,000", "12abc", "abc", "1e", "e5", "--1", "٣", "１２", "00.5", "1\n", "",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "007",
+        "00",
+        "-007",
+        "+5",
+        "+0",
+        " 12 ",
+        " 12",
+        "12 ",
+        "1_000",
+        "-0",
+        "-0.0x",
+        "nan",
+        "NaN",
+        "inf",
+        "-inf",
+        "Infinity",
+        "1e999",
+        "-1e999",
+        "1.",
+        ".5",
+        "0x10",
+        "1,000",
+        "12abc",
+        "abc",
+        "1e",
+        "e5",
+        "--1",
+        "٣",
+        "１２",  # noqa: RUF001 (fullwidth digits are the point of this case)
+        "00.5",
+        "1\n",
+        "",
+    ],
+)
 def test_non_canonical_numbers_stay_text(text):
     r = shape(text, ("GET", "k"))
     assert cols(r) == [("value", S)]
@@ -111,7 +151,7 @@ def test_trailing_newline_not_matched_by_dollar_anchor():
 
 def test_column_all_ints_is_integer():
     r = shape(["1", "2", "-3"], ("LRANGE", "l", 0, -1))
-    assert cols(r) == [("value", I)]
+    assert cols(r) == [("value", INT)]
     assert values(r) == [1, 2, -3]
 
 
@@ -136,7 +176,7 @@ def test_numeric_and_word_mixed_column_stays_string():
 
 def test_nulls_do_not_block_typing():
     r = shape(["1", None, "3"], ("MGET", "a", "b", "c"))
-    assert cols(r) == [("value", I)]
+    assert cols(r) == [("value", INT)]
     assert values(r) == [1, None, 3]
 
 
@@ -205,7 +245,7 @@ def test_frozenset_is_sorted():
 def test_set_of_numeric_strings_sorts_as_text_then_types_int():
     r = shape({"10", "9", "100"}, ("SMEMBERS", "s"))
     assert values(r) == [10, 100, 9]  # sorted as strings, then typed
-    assert cols(r) == [("value", I)]
+    assert cols(r) == [("value", INT)]
 
 
 def test_set_with_mixed_types_does_not_raise():
@@ -221,7 +261,7 @@ def test_zrange_withscores_flat_list_pairs():
 
 def test_zrange_withscores_lowercase_args():
     r = shape(["a", "1"], ("zrange", "z", 0, -1, "withscores"))
-    assert cols(r) == [("member", S), ("score", I)]
+    assert cols(r) == [("member", S), ("score", INT)]
 
 
 def test_zrange_withscores_tuple_pairs_from_redis_py():
@@ -232,7 +272,7 @@ def test_zrange_withscores_tuple_pairs_from_redis_py():
 
 def test_zrange_withscores_integer_scores():
     r = shape(["a", "1", "b", "2"], ("ZREVRANGEBYSCORE", "z", "+inf", "-inf", "WITHSCORES"))
-    assert cols(r) == [("member", S), ("score", I)]
+    assert cols(r) == [("member", S), ("score", INT)]
 
 
 def test_zrange_withscores_empty():
@@ -255,7 +295,7 @@ def test_zrange_without_withscores_is_plain_list():
 
 def test_zrange_numeric_members_still_member_column():
     r = shape(["1", "5", "2", "6"], ("ZRANGE", "z", 0, -1, "WITHSCORES"))
-    assert cols(r) == [("member", I), ("score", I)]
+    assert cols(r) == [("member", INT), ("score", INT)]
 
 
 def test_zpopmin_pairs():
@@ -283,7 +323,7 @@ def test_config_get_flat_list_is_key_value_rows():
 
 def test_config_get_numeric_values_all_numeric_become_integer():
     r = shape({"a": "1", "b": "2"}, ("CONFIG", "GET", "*"))
-    assert cols(r) == [("key", S), ("value", I)]
+    assert cols(r) == [("key", S), ("value", INT)]
 
 
 def test_config_get_empty():
@@ -309,7 +349,7 @@ def test_info_nested_keyspace_dict_is_repr():
 # --- HGETALL -----------------------------------------------------------------
 def test_hgetall_one_row_typed_columns():
     r = shape({"name": "ann", "age": "30", "score": "9.5"}, ("HGETALL", "h"))
-    assert cols(r) == [("name", S), ("age", I), ("score", F)]
+    assert cols(r) == [("name", S), ("age", INT), ("score", F)]
     assert r["rows"] == [{"name": "ann", "age": 30, "score": 9.5}]
 
 
@@ -327,12 +367,12 @@ def test_hgetall_empty_hash_is_empty_key_value_table():
 
 def test_hgetall_unicode_and_spaces_in_field_names():
     r = shape({"naïve field": "1", "日本": "x"}, ("HGETALL", "h"))
-    assert cols(r) == [("naïve field", I), ("日本", S)]
+    assert cols(r) == [("naïve field", INT), ("日本", S)]
 
 
 def test_hgetall_flat_list_duplicate_fields_last_wins():
     r = shape(["a", "1", "a", "2", "b", "x"], ("HGETALL", "h"))
-    assert cols(r) == [("a", I), ("b", S)]
+    assert cols(r) == [("a", INT), ("b", S)]
     assert r["rows"] == [{"a": 2, "b": "x"}]
 
 
@@ -370,14 +410,14 @@ def test_sscan_lowercase_and_list_reply():
 
 
 def test_scan_numeric_key_names_become_integer():
-    assert cols(shape((0, ["1", "2"]), ("SCAN", 0))) == [("value", I)]
+    assert cols(shape((0, ["1", "2"]), ("SCAN", 0))) == [("value", INT)]
 
 
 # --- streams -----------------------------------------------------------------
 def test_xrange_id_plus_field_columns():
     reply = [("1-0", {"a": "1", "b": "x"}), ("2-0", {"a": "2", "b": "y"})]
     r = shape(reply, ("XRANGE", "s", "-", "+"))
-    assert cols(r) == [("id", S), ("a", I), ("b", S)]
+    assert cols(r) == [("id", S), ("a", INT), ("b", S)]
     assert r["rows"] == [{"id": "1-0", "a": 1, "b": "x"}, {"id": "2-0", "a": 2, "b": "y"}]
 
 
@@ -390,7 +430,7 @@ def test_xrange_differing_fields_union_in_first_seen_order_with_nulls():
     reply = [("1-0", {"a": "1"}), ("2-0", {"b": "x", "a": "2"}), ("3-0", {"c": "3"})]
     r = shape(reply, ("XRANGE", "s", "-", "+"))
     assert [c["name"] for c in r["columns"]] == ["id", "a", "b", "c"]
-    assert cols(r) == [("id", S), ("a", I), ("b", S), ("c", I)]
+    assert cols(r) == [("id", S), ("a", INT), ("b", S), ("c", INT)]
     assert r["rows"] == [
         {"id": "1-0", "a": 1, "b": None, "c": None},
         {"id": "2-0", "a": 2, "b": "x", "c": None},
@@ -476,6 +516,12 @@ def test_shape_does_not_mutate_reply():
 
 def test_rows_are_json_serialisable():
     import json
-    for reply, args in [({"a": "1", "b": ["x"]}, ("HGETALL", "h")), ((0, ["k"]), ("SCAN", 0)),
-                        ({"b", "a"}, ()), (None, ()), (True, ("PING",))]:
+
+    for reply, args in [
+        ({"a": "1", "b": ["x"]}, ("HGETALL", "h")),
+        ((0, ["k"]), ("SCAN", 0)),
+        ({"b", "a"}, ()),
+        (None, ()),
+        (True, ("PING",)),
+    ]:
         json.dumps(shape(reply, args))
