@@ -39,6 +39,4 @@ def parse_query(text: str) -> list[str]:
         if "quotation" in str(e):
             raise QueryError("Unbalanced quotes in query: missing closing quotation mark") from e
         raise QueryError(f"Invalid escape in query: {e}") from e
-    if not args:  # unreachable given the non-blank check; defensive
-        raise QueryError("Query is empty: expected one Redis command, e.g. GET mykey")
     return args
