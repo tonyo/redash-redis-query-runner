@@ -10,6 +10,10 @@ python = "3.13.16"
 ruff = "0.17.1"
 ty = "0.0.89"
 
+[tasks.setup]
+description = "Create .env with random local secrets (never overwrites)"
+run = "sh scripts/setup-env.sh"
+
 [tasks.test]
 description = "Run all tests (unit + integration) in the test container"
 run = "docker compose --profile test run --rm --build test"
