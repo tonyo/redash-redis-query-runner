@@ -23,6 +23,19 @@ def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
     return redis.Redis(**kwargs)
 
 
+# redis-py parses these replies with callbacks written for its own OBJECT/COMMAND methods, which
+# raise TypeError on a raw execute_command. Dropping them gives the raw reply for shape().
+_RAW_REPLY_COMMANDS = ("OBJECT", "COMMAND")
+
+
+def _execute(client: redis.Redis, args: list[str]) -> object:
+    callbacks = getattr(client, "response_callbacks", None)
+    if callbacks is not None:
+        for name in _RAW_REPLY_COMMANDS:
+            callbacks.pop(name, None)
+    return client.execute_command(*args)
+
+
 class ConfigError(ValueError):
     """The data source configuration holds a value that cannot be used."""
 
@@ -158,10 +171,15 @@ class Redis(BaseQueryRunner):
         client = None
         try:
             client = self._connect()
-            reply = client.execute_command(*args)
+            reply = _execute(client, args)
             return shape(reply, args), None
         except self._HANDLED as e:
             return None, self._describe(e)
+        except (
+            Exception
+        ) as e:  # a reply the client library or shaper cannot handle: report, don't crash
+            logger.exception("Redis reply could not be read for %s", args[0])
+            return None, f"Could not read the reply to {args[0].upper()} ({type(e).__name__}: {e})"
         finally:
             if client is not None:
                 client.close()

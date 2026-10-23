@@ -360,12 +360,21 @@ def test_password_never_leaks_in_errors(patched):
     assert "hunter2" not in err and "***" in err
 
 
-def test_unexpected_exception_propagates_but_closes(patched):
+def test_unexpected_exception_becomes_an_error_and_closes(patched):
     client = ScriptedClient(RuntimeError("bug"))
     patched(client)
-    with pytest.raises(RuntimeError):
-        make().run_query("GET k", None)
+    data, err = make().run_query("GET k", None)
+    assert data is None
+    assert "GET" in err and "RuntimeError" in err and "bug" in err
     assert client.closed
+
+
+def test_raw_reply_commands_lose_their_redis_py_callbacks(patched):
+    client = ScriptedClient("embstr")
+    client.response_callbacks = {"OBJECT": object(), "COMMAND": object(), "GET": object()}
+    patched(client)
+    make().run_query("OBJECT ENCODING k", None)
+    assert list(client.response_callbacks) == ["GET"]
 
 
 def test_connect_failure_in_constructor_is_an_error_tuple(monkeypatch):

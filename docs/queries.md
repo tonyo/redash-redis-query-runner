@@ -22,15 +22,28 @@ Every result is a table. A column is typed **integer**, **float**, **boolean** o
 | `INFO`, `CONFIG GET` | `key`, `value` | one per entry |
 | `XRANGE`, `XREVRANGE` | `id` plus one column per field | one per entry |
 | `SCAN`, `SSCAN` | `value` | one per key (the cursor is **not** returned yet) |
+| `HSCAN` | `field`, `value` | one per field (cursor not returned) |
+| `ZSCAN` | `member`, `score` | one per member (cursor not returned) |
+| `XREAD`, `XREADGROUP` | `stream`, `id`, plus one column per field | one per entry |
+| `XINFO STREAM`, `MEMORY STATS` | `key`, `value` | one per entry |
+| `XINFO GROUPS`, `XINFO CONSUMERS` | one column per property | one per group or consumer |
+| `GEOPOS` | `longitude`, `latitude` | one per member (empty for a missing member) |
+| `GEOSEARCH`, `GEORADIUS*` with `WITHDIST` / `WITHHASH` / `WITHCOORD` | `member`, then `distance`, `hash`, `longitude`, `latitude` as requested | one per match |
+| `LMPOP` | `key`, `value` | one per popped element |
+| `ZMPOP` | `key`, `member`, `score` | one per popped member |
+| `SLOWLOG GET` | `id`, `start_time`, `duration_us`, `command`, `client_address`, `client_name` | one per entry |
+| `CLIENT LIST`, `CLIENT INFO` | one column per field (`id`, `addr`, `db`, …) | one per client |
+| `INFO keyspace`, `INFO commandstats` | `name` plus one column per field | one per database or command |
 | `PING`, `SET` and other status replies | `value` (`PONG` or `OK`) | one |
 | nil (missing key) | `value` | one row with an empty value |
 
 Notes:
 
 - Sets are sorted so output is stable.
-- A nested reply (a list inside a list) shows each inner element as text.
+- A nested reply with no rule above (for example `EVAL` returning a list in a list) shows each inner element as text.
 - An empty hash returns a table with `key` and `value` columns and no rows.
 - A stream field named `id` becomes `id_1`.
+- `LASTSAVE` shows an ISO date-time as text.
 - Values that aren't valid UTF-8 make the query fail with an error that says so.
 
 ## Errors

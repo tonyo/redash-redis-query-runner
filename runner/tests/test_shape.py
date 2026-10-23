@@ -341,9 +341,18 @@ def test_info_dict_key_value_with_native_types_and_mixed_column_text():
     assert values(r, "key") == list(info)
 
 
-def test_info_nested_keyspace_dict_is_repr():
-    r = shape({"db0": {"keys": 3, "expires": 0}}, ("INFO", "keyspace"))
-    assert values(r, "value") == ["{'keys': 3, 'expires': 0}"]
+def test_info_nested_keyspace_dict_is_a_table():
+    r = shape({"db0": {"keys": 3, "expires": 0}, "db1": {"keys": 5, "expires": 1}}, ("INFO",))
+    assert cols(r) == [("name", S), ("keys", INT), ("expires", INT)]
+    assert r["rows"] == [
+        {"name": "db0", "keys": 3, "expires": 0},
+        {"name": "db1", "keys": 5, "expires": 1},
+    ]
+
+
+def test_info_with_scalar_and_nested_values_stays_key_value():
+    r = shape({"a": 1, "db0": {"keys": 3}}, ("INFO",))
+    assert cols(r) == [("key", S), ("value", S)]
 
 
 # --- HGETALL -----------------------------------------------------------------
@@ -525,3 +534,97 @@ def test_rows_are_json_serialisable():
         (True, ("PING",)),
     ]:
         json.dumps(shape(reply, args))
+
+
+# --- redis-py shapes seen from a real server -------------------------------------
+def test_hscan_gives_field_value_rows_without_cursor():
+    r = shape((0, {"f1": "v1", "f2": "7"}), ("HSCAN", "h", "0"))
+    assert cols(r) == [("field", S), ("value", S)]
+    assert [x["field"] for x in r["rows"]] == ["f1", "f2"]
+
+
+def test_zscan_gives_member_score_rows():
+    r = shape((0, [("a", 1.0), ("b", 2.5)]), ("ZSCAN", "z", "0"))
+    assert cols(r) == [("member", S), ("score", F)]
+
+
+def test_xread_has_stream_id_and_field_columns():
+    reply = [["x", [("1-1", {"a": "1"})]], ["y", [("5-1", {"q": "9"})]]]
+    r = shape(reply, ("XREAD", "STREAMS", "x", "y", "0", "0"))
+    assert cols(r) == [("stream", S), ("id", S), ("a", INT), ("q", INT)]
+    assert r["rows"][1] == {"stream": "y", "id": "5-1", "a": None, "q": 9}
+
+
+def test_xread_empty_reply_is_an_empty_table():
+    assert shape([], ("XREAD", "STREAMS", "x", "$"))["rows"] == []
+
+
+def test_xinfo_stream_flat_pairs_become_key_value():
+    r = shape(["length", 2, "last-generated-id", "2-1"], ("XINFO", "STREAM", "x"))
+    assert cols(r) == [("key", S), ("value", S)]
+    assert len(r["rows"]) == 2
+
+
+def test_xinfo_groups_one_row_per_group():
+    reply = [["name", "g1", "pending", 0], ["name", "g2", "pending", 3]]
+    r = shape(reply, ("XINFO", "GROUPS", "x"))
+    assert cols(r) == [("name", S), ("pending", INT)]
+    assert values(r, "name") == ["g1", "g2"]
+
+
+def test_memory_stats_flat_pairs_become_key_value():
+    r = shape(["peak.allocated", 10, "db.0", ["a", 1]], ("MEMORY", "STATS"))
+    assert cols(r) == [("key", S), ("value", S)]
+
+
+def test_geopos_has_longitude_latitude_and_keeps_missing_members():
+    r = shape([(13.36, 38.11), None], ("GEOPOS", "g", "a", "b"))
+    assert cols(r) == [("longitude", F), ("latitude", F)]
+    assert r["rows"][1] == {"longitude": None, "latitude": None}
+
+
+def test_geosearch_with_flags_names_each_part():
+    reply = [["Palermo", "190.1377", 3479099943497504, ["13.36", "38.11"]]]
+    args = ("GEOSEARCH", "g", "WITHDIST", "WITHHASH", "WITHCOORD")
+    r = shape(reply, args)
+    assert [c[0] for c in cols(r)] == ["member", "distance", "hash", "longitude", "latitude"]
+    assert cols(r)[1] == ("distance", F)
+
+
+def test_geosearch_without_flags_is_a_plain_list():
+    assert cols(shape(["Palermo"], ("GEOSEARCH", "g"))) == [("value", S)]
+
+
+def test_lmpop_rows_carry_the_key():
+    r = shape(["l", ["a", "b"]], ("LMPOP", "1", "l", "LEFT"))
+    assert r["rows"] == [{"key": "l", "value": "a"}, {"key": "l", "value": "b"}]
+
+
+def test_lmpop_nil_is_one_empty_value_row():
+    assert shape(None, ("LMPOP", "1", "l", "LEFT"))["rows"] == [{"value": None}]
+
+
+def test_zmpop_rows_carry_key_member_score():
+    r = shape(["z", [["a", "1"]]], ("ZMPOP", "1", "z", "MIN"))
+    assert cols(r) == [("key", S), ("member", S), ("score", INT)]
+
+
+def test_slowlog_get_names_columns_and_joins_the_command():
+    reply = [[22, 1792795527, 2, ["GEOPOS", "g", "Palermo"], "10.0.0.1:5", ""]]
+    r = shape(reply, ("SLOWLOG", "GET", "1"))
+    assert r["rows"][0]["command"] == "GEOPOS g Palermo"
+    assert [c[0] for c in cols(r)][:3] == ["id", "start_time", "duration_us"]
+
+
+def test_client_list_is_a_row_per_client():
+    text = "id=3 addr=1.2.3.4:5 name= db=0\nid=4 addr=1.2.3.4:6 name=x db=15\n"
+    r = shape(text, ("CLIENT", "LIST"))
+    assert cols(r) == [("id", INT), ("addr", S), ("name", S), ("db", INT)]
+    assert len(r["rows"]) == 2
+
+
+def test_datetime_cell_is_iso_text():
+    from datetime import datetime
+
+    r = shape(datetime(2026, 10, 23, 22, 44, 40), ("LASTSAVE",))
+    assert r["rows"] == [{"value": "2026-10-23T22:44:40"}]
