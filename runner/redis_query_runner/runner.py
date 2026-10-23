@@ -8,21 +8,19 @@ from typing import Any
 import redis
 from redash.query_runner import BaseQueryRunner, register
 
+from .config import (
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_DB,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_REQUEST_TIMEOUT,
+    ConfigError,
+    Settings,
+)
 from .parser import QueryError, parse_query
 from .shape import shape
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 6379
-DEFAULT_DB = 0
-DEFAULT_CONNECT_TIMEOUT = (
-    5  # seconds: a bad host fails fast, well inside Test Connection's 30 s job limit
-)
-DEFAULT_REQUEST_TIMEOUT = 30  # seconds per command
-MAX_CONNECT_TIMEOUT = 30  # Test Connection is a 30 s job
-MAX_REQUEST_TIMEOUT = 3600
-
 
 # redis-py parses these replies with callbacks written for its own OBJECT/COMMAND methods, which
 # raise TypeError on a raw execute_command. Dropping them gives the raw reply for shape().
@@ -35,30 +33,6 @@ def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
     for name in _RAW_REPLY_COMMANDS:
         client.response_callbacks.pop(name, None)
     return client
-
-
-class ConfigError(ValueError):
-    """The data source configuration holds a value that cannot be used."""
-
-
-def _as_int(name: str, value: object, default: int, minimum: int, maximum: int) -> int:
-    """Config value -> int in [minimum, maximum].
-
-    Unset/blank -> default; anything else unusable raises.
-    """
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return default
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise ConfigError(f"Invalid {name}: {value!r} is not a whole number")
-    try:
-        n = int(value.strip() if isinstance(value, str) else value)
-        if isinstance(value, float) and value != n:
-            raise ValueError
-    except (ValueError, OverflowError):
-        raise ConfigError(f"Invalid {name}: {value!r} is not a whole number") from None
-    if not minimum <= n <= maximum:
-        raise ConfigError(f"Invalid {name}: {n} is outside {minimum}-{maximum}")
-    return n
 
 
 class Redis(BaseQueryRunner):
@@ -111,50 +85,22 @@ class Redis(BaseQueryRunner):
             "secret": ["password"],
         }
 
-    # -- configuration, with defaults applied here (schema defaults are only form placeholders)
-
-    def _host(self) -> str:
-        host = self.configuration.get("host")
-        if host is not None and not isinstance(host, str):
-            raise ConfigError(f"Invalid host: {host!r} is not text")
-        return (host or "").strip() or DEFAULT_HOST
-
-    def _port(self) -> int:
-        return _as_int("port", self.configuration.get("port"), DEFAULT_PORT, 1, 65535)
-
-    def _db(self) -> int:
-        return _as_int("database index", self.configuration.get("db"), DEFAULT_DB, 0, 2**31 - 1)
-
-    def _connect_timeout(self) -> int:
-        value = self.configuration.get("connect_timeout")
-        return _as_int("connect timeout", value, DEFAULT_CONNECT_TIMEOUT, 1, MAX_CONNECT_TIMEOUT)
-
-    def _request_timeout(self) -> int:
-        value = self.configuration.get("request_timeout")
-        return _as_int("request timeout", value, DEFAULT_REQUEST_TIMEOUT, 1, MAX_REQUEST_TIMEOUT)
-
-    def _username(self) -> str | None:
-        username = self.configuration.get("username")
-        if username is not None and not isinstance(username, str):
-            raise ConfigError(f"Invalid username: {username!r} is not text")
-        return (username or "").strip() or None
-
-    def _password(self) -> str | None:
-        password = self.configuration.get("password")
-        if password is not None and not isinstance(password, str):
-            raise ConfigError("Invalid password: not text")
-        return password or None
+    def _settings(self) -> Settings:
+        """The validated configuration, with defaults applied (schema defaults are only form
+        placeholders)."""
+        return Settings.from_config(self.configuration)
 
     def _connect(self) -> redis.Redis:
+        settings = self._settings()
         return new_client(
-            host=self._host(),
-            port=self._port(),
-            db=self._db(),
-            username=self._username(),
-            password=self._password(),
+            host=settings.host,
+            port=settings.port,
+            db=settings.db,
+            username=settings.username,
+            password=settings.password,
             decode_responses=True,
-            socket_connect_timeout=self._connect_timeout(),
-            socket_timeout=self._request_timeout(),
+            socket_connect_timeout=settings.connect_timeout,
+            socket_timeout=settings.request_timeout,
         )
 
     # -- errors
@@ -163,7 +109,8 @@ class Redis(BaseQueryRunner):
         """An exception -> one clear line for the user (never containing the password)."""
         if isinstance(e, (QueryError, ConfigError)):
             return str(e)
-        where = f"{self._host()}:{self._port()}"
+        settings = self._settings()
+        where = f"{settings.host}:{settings.port}"
         if isinstance(e, redis.AuthenticationError):  # subclass of ConnectionError: check first
             msg = f"Redis authentication failed at {where}: {e}"
         elif isinstance(e, redis.TimeoutError):
@@ -178,9 +125,8 @@ class Redis(BaseQueryRunner):
             msg = "Reply contains binary data that is not valid UTF-8 and cannot be shown"
         else:
             raise e
-        password = self._password()
-        if password:
-            msg = msg.replace(password, "***")
+        if settings.password:
+            msg = msg.replace(settings.password, "***")
         return msg
 
     _HANDLED = (QueryError, ConfigError, redis.RedisError, UnicodeDecodeError)
