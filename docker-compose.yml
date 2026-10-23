@@ -1,0 +1,119 @@
+# Stock Redash v26.9.0 + a seeded data Redis. The runner is bind-mounted, not baked in.
+x-redash: &redash
+  image: redash/redash:26.9.0
+  env_file: .env
+  environment:
+    REDASH_ADDITIONAL_QUERY_RUNNERS: redis_query_runner
+    PYTHONPATH: /extensions
+  volumes:
+    - ./runner:/extensions:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  init:
+    <<: *redash
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /app/bin/docker-entrypoint create_db &&
+        (/app/bin/docker-entrypoint manage users create_root admin@example.com admin --password "$$ADMIN_PASSWORD" || true)
+
+  server:
+    <<: *redash
+    command: server
+    ports:
+      - "5000:5000"
+    environment:
+      REDASH_ADDITIONAL_QUERY_RUNNERS: redis_query_runner
+      PYTHONPATH: /extensions
+      REDASH_WEB_WORKERS: "2"
+
+  scheduler:
+    <<: *redash
+    command: scheduler
+
+  worker:
+    <<: *redash
+    command: worker
+    environment:
+      REDASH_ADDITIONAL_QUERY_RUNNERS: redis_query_runner
+      PYTHONPATH: /extensions
+      WORKERS_COUNT: "2"
+
+  # Test runner (profile `test`): stock Redash image + pytest. Run via `mise run test`.
+  test:
+    <<: *redash
+    profiles: ["test"]
+    build: ./tests
+    image: redash-extensions-test:26.9.0
+    working_dir: /extensions
+    depends_on:
+      data-redis:
+        condition: service_healthy
+    restart: "no"
+    # /extensions is read-only, so no pytest cache.
+    entrypoint: ["python", "-m", "pytest", "-p", "no:cacheprovider"]
+    environment:
+      REDASH_ADDITIONAL_QUERY_RUNNERS: redis_query_runner
+      PYTHONPATH: /extensions:/app  # /app so `import redash` works from working_dir /extensions
+      PYTHONDONTWRITEBYTECODE: "1"
+
+  postgres:
+    image: postgres:17-alpine
+    env_file: .env
+    environment:
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Internal Redis: Redash's job queue and cache. Never a query target.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Data Redis: what users query through the runner.
+  data-redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: (re)loads seed/seed.redis into the data Redis DB 0. Idempotent (DEL then recreate).
+  seed:
+    image: redis:7-alpine
+    command: ["sh", "-c", "redis-cli -h data-redis < /seed/seed.redis"]
+    volumes:
+      - ./seed:/seed:ro
+    depends_on:
+      data-redis:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres-data:

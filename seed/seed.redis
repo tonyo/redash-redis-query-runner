@@ -1,0 +1,19 @@
+DEL sales:revenue_by_region
+ZADD sales:revenue_by_region 900 north 1250.50 south 85 east 12000 west 430.25 central 7.5 islands
+
+DEL product:1001
+HSET product:1001 name "Espresso Machine Pro" stock 42 price 249.99
+
+DEL greeting
+SET greeting "hello from the seed"
+
+DEL recent:orders
+RPUSH recent:orders order-5003 order-5002 order-5001
+
+DEL tags:product:1001
+SADD tags:product:1001 kitchen coffee appliance
+
+DEL events
+XADD events 1700000000000-0 user alice action purchase amount 249.99
+XADD events 1700000001000-0 user bob action view amount 0
+XADD events 1700000002000-0 user carol action refund amount 19.5

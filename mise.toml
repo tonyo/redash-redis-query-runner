@@ -1,0 +1,28 @@
+# Tests run in containers (see tests/Dockerfile), so the host needs only docker
+# compose; there is nothing to pin under [tools].
+[tools]
+
+[tasks.test]
+description = "Run all tests (unit + integration) in the test container"
+run = "docker compose --profile test run --rm --build test"
+
+[tasks."test:unit"]
+description = "Run unit tests only (no Redis needed)"
+run = "docker compose --profile test run --rm --build test -m 'not integration'"
+
+[tasks."test:integration"]
+description = "Run integration tests against data-redis, logical DB 15"
+run = "docker compose --profile test run --rm --build test -m integration"
+
+[tasks.lint]
+description = "Syntax-check every .py under runner/ in the test container"
+# compile() in memory: /extensions is read-only, so compileall could not write .pyc files.
+run = """
+docker compose --profile test run --rm --build --entrypoint python test -c \
+  "import pathlib; [compile(p.read_text(), str(p), 'exec') for p in pathlib.Path('/extensions').rglob('*.py')]"
+"""
+
+[tasks.demo]
+description = "Idempotent demo: create the Redis data source, queries, bar chart and dashboard via the Redash API (needs `docker compose up -d` and the seed)"
+# Stdlib-only Python on the host; reads ADMIN_PASSWORD from .env without printing it.
+run = "python3 demo/demo.py"

@@ -1,0 +1,8 @@
+.env
+
+# wayfinder map, tickets and research
+.scratch/
+prototypes/
+
+*.swp
+__pycache__/
