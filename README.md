@@ -32,9 +32,12 @@ The stack has two Redis instances. The **Internal Redis** is Redash's own job qu
 | Host | `localhost` | Required. |
 | Port | `6379` | 1–65535. |
 | Database index | `0` | Redis logical database. |
+| Username | none | Redis 6+ ACL user. Blank logs in as `default`. |
 | Password | none | Stored as a Redash secret. |
+| Connect timeout (seconds) | `5` | 1–30. A bad host fails after this long. |
+| Request timeout (seconds) | `30` | 1–3600. Per command. |
 
-A bad value (for example port `abc`) gives an error message. A blank value uses the default. There are fixed timeouts of 5 s to connect and 30 s per command.
+A bad value (for example port `abc`) gives an error message. A blank value uses the default.
 
 ## Writing queries
 
@@ -54,8 +57,14 @@ See [docs/install.md](docs/install.md). In short: mount the `runner/` folder int
 
 ## Security
 
-- **There is no command filter.** Anyone who can use the data source can run any command, including `FLUSHALL`, `CONFIG SET` and `EVAL`. Redash re-runs saved and scheduled queries, so a write command in a saved query repeats on every refresh.
-- **Use a least-privilege account.** Point the data source at a Redis user that can only read what is needed. The runner has no username field yet, so today that means a password-protected instance with the `default` user, or a separate read-only replica.
+- **There is no command filter in the runner.** Anyone who can use the data source can run any command, including `FLUSHALL`, `CONFIG SET` and `EVAL`. Redash re-runs saved and scheduled queries, so a write command in a saved query repeats on every refresh.
+- **Make a data source read-only with a Redis ACL user.** Redash groups only decide who may run queries (a "view only" group can't run new ones), not which commands run. Redis enforces commands server-side:
+
+  ```
+  ACL SETUSER readonly on >CHANGE-ME ~* +@read +ping +select +info +object +memory|usage +xinfo +slowlog|get +command +client|list
+  ```
+
+  Put that user in the **Username** and **Password** fields, and give the people who should only read the read-only data source. Keep a second data source with a write-capable login for the people who may write. `+@read` leaves out `INFO` and `CLIENT` (they are `@dangerous`), so those are added by name. `+select` is needed whenever the database index is not 0. Module commands (`JSON.*`, `TS.*`) are never in `+@read`: add them by name. The compose stack seeds a user `readonly` with password `readonly` and the demo adds a "(read-only)" data source for it.
 - **No TLS.** The connection is plain text. Keep it on a trusted network.
 - The compose file is for **local development**. Its secrets are random per checkout, but the Data Redis and Internal Redis have no password and the Redash port is open on all interfaces.
 

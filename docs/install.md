@@ -31,4 +31,4 @@ The runner is a Python package (`runner/redis_query_runner/`) with no dependenci
 | "Redis" is not in the list | The env var or `PYTHONPATH` is missing on `server`, or the folder is not mounted. |
 | Test Connection fails but the list shows Redis | The `worker` is missing the env var or the mount. |
 | `Could not connect to Redis at host:port` | Wrong host, or the Redash container can't reach it. Inside Docker, use the service name, not `localhost`. |
-| `Redis authentication failed` | Wrong or missing password. |
+| `Redis authentication failed` | Wrong or missing username or password. |

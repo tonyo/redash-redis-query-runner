@@ -14,8 +14,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 6379
 DEFAULT_DB = 0
-CONNECT_TIMEOUT = 5  # seconds: a bad host fails fast, well inside Test Connection's 30 s job limit
-COMMAND_TIMEOUT = 30  # seconds per command
+DEFAULT_CONNECT_TIMEOUT = (
+    5  # seconds: a bad host fails fast, well inside Test Connection's 30 s job limit
+)
+DEFAULT_REQUEST_TIMEOUT = 30  # seconds per command
+MAX_CONNECT_TIMEOUT = 30  # Test Connection is a 30 s job
+MAX_REQUEST_TIMEOUT = 3600
 
 
 def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
@@ -84,9 +88,28 @@ class Redis(BaseQueryRunner):
                 "host": {"type": "string", "title": "Host", "default": DEFAULT_HOST},
                 "port": {"type": "number", "title": "Port", "default": DEFAULT_PORT},
                 "db": {"type": "number", "title": "Database index", "default": DEFAULT_DB},
+                "username": {"type": "string", "title": "Username (Redis 6+ ACL)"},
                 "password": {"type": "string", "title": "Password"},
+                "connect_timeout": {
+                    "type": "number",
+                    "title": "Connect timeout (seconds)",
+                    "default": DEFAULT_CONNECT_TIMEOUT,
+                },
+                "request_timeout": {
+                    "type": "number",
+                    "title": "Request timeout (seconds)",
+                    "default": DEFAULT_REQUEST_TIMEOUT,
+                },
             },
-            "order": ["host", "port", "db", "password"],
+            "order": [
+                "host",
+                "port",
+                "db",
+                "username",
+                "password",
+                "connect_timeout",
+                "request_timeout",
+            ],
             "required": ["host"],
             "secret": ["password"],
         }
@@ -105,6 +128,20 @@ class Redis(BaseQueryRunner):
     def _db(self) -> int:
         return _as_int("database index", self.configuration.get("db"), DEFAULT_DB, 0, 2**31 - 1)
 
+    def _connect_timeout(self) -> int:
+        value = self.configuration.get("connect_timeout")
+        return _as_int("connect timeout", value, DEFAULT_CONNECT_TIMEOUT, 1, MAX_CONNECT_TIMEOUT)
+
+    def _request_timeout(self) -> int:
+        value = self.configuration.get("request_timeout")
+        return _as_int("request timeout", value, DEFAULT_REQUEST_TIMEOUT, 1, MAX_REQUEST_TIMEOUT)
+
+    def _username(self) -> str | None:
+        username = self.configuration.get("username")
+        if username is not None and not isinstance(username, str):
+            raise ConfigError(f"Invalid username: {username!r} is not text")
+        return (username or "").strip() or None
+
     def _password(self) -> str | None:
         password = self.configuration.get("password")
         if password is not None and not isinstance(password, str):
@@ -116,10 +153,11 @@ class Redis(BaseQueryRunner):
             host=self._host(),
             port=self._port(),
             db=self._db(),
+            username=self._username(),
             password=self._password(),
             decode_responses=True,
-            socket_connect_timeout=CONNECT_TIMEOUT,
-            socket_timeout=COMMAND_TIMEOUT,
+            socket_connect_timeout=self._connect_timeout(),
+            socket_timeout=self._request_timeout(),
         )
 
     # -- errors

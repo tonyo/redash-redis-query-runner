@@ -117,19 +117,20 @@ def api(method, path, body=None, ok_errors=()):
 # ---- data source ---------------------------------------------------------
 
 
-def ensure_data_source():
-    opts = {"host": "data-redis", "port": 6379, "db": 0}
-    found = next((d for d in api("GET", "/api/data_sources") if d["name"] == DS_NAME), None)
+def ensure_data_source(name=None, extra=None):
+    name = name or DS_NAME
+    opts = {"host": "data-redis", "port": 6379, "db": 0} | (extra or {})
+    found = next((d for d in api("GET", "/api/data_sources") if d["name"] == name), None)
     if found:
         ds = api(
             "POST",
             f"/api/data_sources/{found['id']}",
-            {"name": DS_NAME, "type": "redis", "options": opts},
+            {"name": name, "type": "redis", "options": opts},
         )
-        print(f"  data source '{DS_NAME}' exists (id {ds['id']})")
+        print(f"  data source '{name}' exists (id {ds['id']})")
     else:
-        ds = api("POST", "/api/data_sources", {"name": DS_NAME, "type": "redis", "options": opts})
-        print(f"  created data source '{DS_NAME}' (id {ds['id']})")
+        ds = api("POST", "/api/data_sources", {"name": name, "type": "redis", "options": opts})
+        print(f"  created data source '{name}' (id {ds['id']})")
     check(ds["type"] == "redis", "data source type is redis")
     res = api("POST", f"/api/data_sources/{ds['id']}/test")
     check(res and res.get("ok") is True, "data source connection test passes")
@@ -287,6 +288,11 @@ def main():
     print("Data source")
     ds_id = ensure_data_source()
 
+    # the seeded ACL user (seed/seed.redis) can read but not write
+    ro_id = ensure_data_source(
+        DS_NAME + " (read-only)", {"username": "readonly", "password": "readonly"}
+    )
+
     print("Queries")
     q_zset = ensure_query(
         ds_id, PREFIX + "revenue by region", "ZRANGE sales:revenue_by_region 0 -1 WITHSCORES"
@@ -346,6 +352,13 @@ def main():
         err and "Redis error" in err and "unknown command" in err.lower(),
         "NOSUCHCMD surfaces the Redis error text",
     )
+
+    d = run_result("/api/query_results", {"data_source_id": ro_id, "query": "DBSIZE", "max_age": 0})
+    check(d[0] is not None, "read-only user can read")
+    _, err = run_result(
+        "/api/query_results", {"data_source_id": ro_id, "query": "SET demo:ro 1", "max_age": 0}
+    )
+    check(err and "no permissions" in err, "read-only user cannot write")
 
     print("Visualizations")
     chart_id = ensure_chart(q_zset)

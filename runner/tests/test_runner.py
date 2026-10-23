@@ -89,10 +89,18 @@ def test_annotate_query_is_a_noop():
 def test_schema_contents():
     s = Redis.configuration_schema()
     assert s["type"] == "object"
-    assert set(s["properties"]) == {"host", "port", "db", "password"}
+    assert set(s["properties"]) == {
+        "host",
+        "port",
+        "db",
+        "username",
+        "password",
+        "connect_timeout",
+        "request_timeout",
+    }
     assert s["required"] == ["host"]
     assert s["secret"] == ["password"]
-    assert s["order"] == ["host", "port", "db", "password"]
+    assert s["order"][:5] == ["host", "port", "db", "username", "password"]
     assert s["properties"]["port"]["type"] == "number"
     assert s["properties"]["db"]["type"] == "number"
     json.dumps(s)
@@ -132,6 +140,41 @@ def test_config_defaults(patched, cfg, expected):
 
 
 @pytest.mark.parametrize(
+    "cfg, expected",
+    [
+        ({"host": "h"}, None),
+        ({"host": "h", "username": ""}, None),
+        ({"host": "h", "username": "  "}, None),
+        ({"host": "h", "username": None}, None),
+        ({"host": "h", "username": "readonly"}, "readonly"),
+        ({"host": "h", "username": " readonly "}, "readonly"),
+    ],
+)
+def test_username_is_passed_to_the_client(patched, cfg, expected):
+    client = ScriptedClient("x")
+    patched(client)
+    Redis(cfg).run_query("GET k", None)
+    assert client.kwargs["username"] == expected
+
+
+@pytest.mark.parametrize(
+    "cfg, expected",
+    [
+        ({"host": "h"}, (5, 30)),
+        ({"host": "h", "connect_timeout": "", "request_timeout": None}, (5, 30)),
+        ({"host": "h", "connect_timeout": 2, "request_timeout": 120}, (2, 120)),
+        ({"host": "h", "connect_timeout": " 7 ", "request_timeout": "90"}, (7, 90)),
+    ],
+)
+def test_timeouts_are_passed_to_the_client(patched, cfg, expected):
+    client = ScriptedClient("x")
+    patched(client)
+    Redis(cfg).run_query("GET k", None)
+    kw = client.kwargs
+    assert (kw["socket_connect_timeout"], kw["socket_timeout"]) == expected
+
+
+@pytest.mark.parametrize(
     "cfg, fragment",
     [
         ({"host": "h", "port": "abc"}, "Invalid port"),
@@ -149,6 +192,13 @@ def test_config_defaults(patched, cfg, expected):
         ({"host": "h", "db": {"a": 1}}, "Invalid database index"),
         ({"host": 123}, "Invalid host"),
         ({"host": "h", "password": 123}, "Invalid password"),
+        ({"host": "h", "username": 123}, "Invalid username"),
+        ({"host": "h", "connect_timeout": 0}, "Invalid connect timeout"),
+        ({"host": "h", "connect_timeout": 31}, "Invalid connect timeout"),
+        ({"host": "h", "connect_timeout": "fast"}, "Invalid connect timeout"),
+        ({"host": "h", "request_timeout": -1}, "Invalid request timeout"),
+        ({"host": "h", "request_timeout": 3601}, "Invalid request timeout"),
+        ({"host": "h", "request_timeout": 2.5}, "Invalid request timeout"),
     ],
 )
 def test_invalid_config_is_an_error(patched, cfg, fragment):

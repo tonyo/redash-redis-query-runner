@@ -216,3 +216,53 @@ def test_test_connection_refused():
 def test_test_connection_wrong_password():
     with pytest.raises(Exception, match=r"(?i)auth|password"):
         Redis({"host": HOST, "port": PORT, "password": "nope"}).test_connection()
+
+
+# ---- read-only ACL user (the recommended way to make a data source read-only)
+
+READONLY_USER = "ro-test"
+READONLY_PASSWORD = "ro-test-pw"
+READONLY_RULES = (
+    "on >" + READONLY_PASSWORD + " ~* +@read +ping +select +info +object +memory|usage +xinfo"
+    " +slowlog|get +command +client|list"
+)
+
+
+@pytest.fixture
+def ro(real_redis):
+    real_redis.execute_command("ACL", "SETUSER", READONLY_USER, "reset", *READONLY_RULES.split())
+
+    def _run(query):
+        cfg = {"host": HOST, "port": PORT, "db": 15}
+        cfg |= {"username": READONLY_USER, "password": READONLY_PASSWORD}
+        return Redis(cfg).run_query(query, None)
+
+    yield _run
+    real_redis.execute_command("ACL", "DELUSER", READONLY_USER)
+
+
+def test_acl_user_can_read(ro, real_redis):
+    real_redis.set("k", "hello")
+    assert ok(ro("GET k"))["rows"] == [{"value": "hello"}]
+    assert ok(ro("SCAN 0"))["rows"] == [{"value": "k"}]
+    assert any(r["key"] == "redis_version" for r in ok(ro("INFO server"))["rows"])
+
+
+@pytest.mark.parametrize(
+    "query", ["SET k v", "DEL k", "FLUSHDB", "CONFIG GET maxmemory", "EVAL 'return 1' 0"]
+)
+def test_acl_user_cannot_write_or_administer(ro, real_redis, query):
+    real_redis.set("k", "hello")
+    assert "no permissions" in err_of(ro(query))
+    assert real_redis.get("k") == "hello"
+
+
+def test_acl_user_wrong_password(ro):
+    cfg = {"host": HOST, "port": PORT, "username": READONLY_USER, "password": "nope"}
+    err = err_of(Redis(cfg).run_query("GET k", None))
+    assert "nope" not in err and "authentication failed" in err.lower()
+
+
+def test_acl_user_test_connection(ro):
+    cfg = {"host": HOST, "port": PORT, "username": READONLY_USER, "password": READONLY_PASSWORD}
+    Redis(cfg).test_connection()
