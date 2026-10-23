@@ -1,0 +1,32 @@
+# Fast checks only (no docker). Install once with: mise exec -- pre-commit install
+# Tests are manual: mise run test
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b # v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # compose and config files only; plain YAML, no custom tags
+        files: \.(ya?ml)$
+
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: mise exec -- ruff format
+        language: system
+        types: [python]
+
+      - id: ruff-check
+        name: ruff check
+        entry: mise exec -- ruff check
+        language: system
+        types: [python]
+
+      - id: ty
+        name: ty check
+        entry: mise exec -- ty check
+        language: system
+        pass_filenames: false
+        types: [python]
