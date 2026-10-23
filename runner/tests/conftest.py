@@ -9,17 +9,32 @@ DATA_REDIS_PORT = int(os.environ.get("DATA_REDIS_PORT", "6379"))
 TEST_DB = 15  # never DB 0, which holds the seed data
 
 
-class FakeRedis:
-    """Minimal in-memory stand-in for redis.Redis. Extend as the runner needs it."""
+_STORE = object()
 
-    def __init__(self):
+
+class FakeRedis:
+    """Stand-in for redis.Redis. By default an in-memory GET/SET store; given an `outcome`, every
+    command returns it (or raises it, if it is an exception). Records calls and close()."""
+
+    def __init__(self, outcome=_STORE, kwargs=None):
+        self.outcome = outcome
+        self.kwargs = kwargs
         self.data = {}
+        self.calls = []
         self.closed = False
 
     def close(self):
         self.closed = True
 
+    def _scripted(self):
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return self.outcome
+
     def ping(self):
+        self.calls.append(("PING",))
+        if self.outcome is not _STORE:
+            self._scripted()
         return True
 
     def set(self, key, value):
@@ -30,6 +45,9 @@ class FakeRedis:
         return self.data.get(key)
 
     def execute_command(self, *args):
+        self.calls.append(args)
+        if self.outcome is not _STORE:
+            return self._scripted()
         name, *rest = args
         return getattr(self, name.lower())(*rest)
 

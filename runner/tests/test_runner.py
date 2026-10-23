@@ -5,6 +5,7 @@ import json
 import pytest
 import redis
 import redis_query_runner
+from conftest import FakeRedis
 from redash.query_runner import (
     TYPE_FLOAT,
     TYPE_INTEGER,
@@ -15,31 +16,6 @@ from redash.query_runner import (
 from redash.utils import json_dumps
 from redis_query_runner import runner as runner_mod
 from redis_query_runner.runner import Redis
-
-
-class ScriptedClient:
-    """Fake client: returns or raises a scripted outcome, records calls and close()."""
-
-    def __init__(self, outcome=None, kwargs=None):
-        self.outcome = outcome
-        self.kwargs = kwargs
-        self.calls = []
-        self.closed = False
-
-    def execute_command(self, *args):
-        self.calls.append(args)
-        if isinstance(self.outcome, BaseException):
-            raise self.outcome
-        return self.outcome
-
-    def ping(self):
-        self.calls.append(("PING",))
-        if isinstance(self.outcome, BaseException):
-            raise self.outcome
-        return True
-
-    def close(self):
-        self.closed = True
 
 
 @pytest.fixture
@@ -132,7 +108,7 @@ def test_schema_has_no_timeout_or_url_field():
     ],
 )
 def test_config_defaults(patched, cfg, expected):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     Redis(cfg).run_query("GET k", None)
     kw = client.kwargs
@@ -151,7 +127,7 @@ def test_config_defaults(patched, cfg, expected):
     ],
 )
 def test_username_is_passed_to_the_client(patched, cfg, expected):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     Redis(cfg).run_query("GET k", None)
     assert client.kwargs["username"] == expected
@@ -167,7 +143,7 @@ def test_username_is_passed_to_the_client(patched, cfg, expected):
     ],
 )
 def test_timeouts_are_passed_to_the_client(patched, cfg, expected):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     Redis(cfg).run_query("GET k", None)
     kw = client.kwargs
@@ -202,7 +178,7 @@ def test_timeouts_are_passed_to_the_client(patched, cfg, expected):
     ],
 )
 def test_invalid_config_is_an_error(patched, cfg, fragment):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     data, error = Redis(cfg).run_query("GET k", None)
     assert data is None and fragment in error
@@ -212,13 +188,13 @@ def test_invalid_config_is_an_error(patched, cfg, fragment):
 
 
 def test_invalid_config_reported_even_for_a_bad_query(patched):
-    patched(ScriptedClient("x"))
+    patched(FakeRedis("x"))
     _, error = Redis({"host": "h", "port": "abc"}).run_query("", None)
     assert error  # a parse error or a config error, never a crash
 
 
 def test_client_options_are_fixed(patched):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     Redis({"host": "h", "decode_responses": False, "socket_timeout": 1}).run_query("GET k", None)
     kw = client.kwargs
@@ -249,14 +225,14 @@ def test_set_then_get_with_fake_redis(monkeypatch, fake_redis):
 
 
 def test_command_args_reach_client_as_parsed(patched):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     patched(client)
     make().run_query('  set   \'a b\' "c\\"d"  \n', None)
     assert client.calls == [("set", "a b", 'c"d')]
 
 
 def test_multiline_query_rejected_without_connecting(patched):
-    client = ScriptedClient("x")
+    client = FakeRedis("x")
     made = patched(client)
     data, err = make().run_query("GET a\nGET b", None)
     assert data is None
@@ -266,7 +242,7 @@ def test_multiline_query_rejected_without_connecting(patched):
 
 @pytest.mark.parametrize("q", ["", "   ", "\n\n", "\t \n "])
 def test_empty_query(patched, q):
-    made = patched(ScriptedClient("x"))
+    made = patched(FakeRedis("x"))
     data, err = make().run_query(q, None)
     assert data is None
     assert "empty" in err.lower()
@@ -274,13 +250,13 @@ def test_empty_query(patched, q):
 
 
 def test_unbalanced_quote(patched):
-    patched(ScriptedClient("x"))
+    patched(FakeRedis("x"))
     data, err = make().run_query('GET "abc', None)
     assert data is None and "quote" in err.lower()
 
 
 def test_trailing_blank_lines_ok(patched):
-    client = ScriptedClient("v")
+    client = FakeRedis("v")
     patched(client)
     assert make().run_query("GET k\n\n\n", None)[1] is None
 
@@ -324,7 +300,7 @@ def test_trailing_blank_lines_ok(patched):
     ],
 )
 def test_reply_kinds(patched, query, reply, columns, rows):
-    client = ScriptedClient(reply)
+    client = FakeRedis(reply)
     patched(client)
     data, err = make().run_query(query, None)
     assert err is None
@@ -334,7 +310,7 @@ def test_reply_kinds(patched, query, reply, columns, rows):
 
 
 def test_column_types(patched):
-    patched(ScriptedClient({"i": "1", "f": "1.5", "s": "x"}))
+    patched(FakeRedis({"i": "1", "f": "1.5", "s": "x"}))
     data, _ = make().run_query("HGETALL h", None)
     assert {c["name"]: c["type"] for c in data["columns"]} == {
         "i": TYPE_INTEGER,
@@ -363,7 +339,7 @@ def test_column_types(patched):
     ],
 )
 def test_result_is_json_serializable(patched, reply):
-    patched(ScriptedClient(reply))
+    patched(FakeRedis(reply))
     data, err = make().run_query("FOO x", None)
     assert err is None
     assert isinstance(data, dict)
@@ -390,7 +366,7 @@ def test_result_is_json_serializable(patched, reply):
     ],
 )
 def test_error_paths(patched, exc, needle):
-    client = ScriptedClient(exc)
+    client = FakeRedis(exc)
     patched(client)
     data, err = make().run_query("FOO x", None)
     assert data is None
@@ -399,19 +375,19 @@ def test_error_paths(patched, exc, needle):
 
 
 def test_error_mentions_configured_host_and_port(patched):
-    patched(ScriptedClient(redis.ConnectionError("nope")))
+    patched(FakeRedis(redis.ConnectionError("nope")))
     _, err = Redis({"host": "db.internal", "port": 7000}).run_query("GET k", None)
     assert "db.internal:7000" in err
 
 
 def test_password_never_leaks_in_errors(patched):
-    patched(ScriptedClient(redis.AuthenticationError("bad password hunter2 given")))
+    patched(FakeRedis(redis.AuthenticationError("bad password hunter2 given")))
     _, err = Redis({"host": "h", "password": "hunter2"}).run_query("GET k", None)
     assert "hunter2" not in err and "***" in err
 
 
 def test_unexpected_exception_becomes_an_error_and_closes(patched):
-    client = ScriptedClient(RuntimeError("bug"))
+    client = FakeRedis(RuntimeError("bug"))
     patched(client)
     data, err = make().run_query("GET k", None)
     assert data is None
@@ -440,7 +416,7 @@ def test_connect_failure_in_constructor_is_an_error_tuple(monkeypatch):
 
 
 def test_each_query_uses_a_fresh_client(patched):
-    c = ScriptedClient("x")
+    c = FakeRedis("x")
     made = patched(c)
     r = make()
     r.run_query("GET a", None)
@@ -452,7 +428,7 @@ def test_each_query_uses_a_fresh_client(patched):
 
 
 def test_test_connection_success(patched):
-    client = ScriptedClient()
+    client = FakeRedis()
     patched(client)
     assert make().test_connection() is None
     assert client.calls == [("PING",)]
@@ -469,7 +445,7 @@ def test_test_connection_success(patched):
     ],
 )
 def test_test_connection_failure_raises(patched, exc, needle):
-    client = ScriptedClient(exc)
+    client = FakeRedis(exc)
     patched(client)
     with pytest.raises(Exception, match="(?i)" + needle):
         make().test_connection()
@@ -477,7 +453,7 @@ def test_test_connection_failure_raises(patched, exc, needle):
 
 
 def test_test_connection_failure_hides_password(patched):
-    patched(ScriptedClient(redis.AuthenticationError("pw=s3cret")))
+    patched(FakeRedis(redis.AuthenticationError("pw=s3cret")))
     with pytest.raises(Exception) as ei:
         Redis({"host": "h", "password": "s3cret"}).test_connection()
     assert "s3cret" not in str(ei.value)
