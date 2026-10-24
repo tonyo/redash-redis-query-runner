@@ -115,3 +115,7 @@ docker-compose.yml           Redash v26.9.0 + data Redis (+ `test` profile)
 ```
 
 `CLAUDE.md` holds the same project notes in a form for coding agents.
+
+## License
+
+[MIT](LICENSE). Unofficial community project: not affiliated with or endorsed by Redash or Redis.
