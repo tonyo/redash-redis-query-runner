@@ -36,8 +36,20 @@ The stack has two Redis instances. The **Internal Redis** is Redash's own job qu
 | Password | none | Stored as a Redash secret. |
 | Connect timeout (seconds) | `5` | 1–30. A bad host fails after this long. |
 | Request timeout (seconds) | `30` | 1–3600. Per command. |
+| Use TLS | off | Turn on for servers with in-transit encryption. The certificate is verified against the system CAs. |
+| Cluster mode | off | Turn on for Redis Cluster. Only database 0 exists. |
 
 A bad value (for example port `abc`) gives an error message. A blank value uses the default.
+
+## Amazon ElastiCache
+
+- **In-transit encryption on:** tick **Use TLS**.
+- **AUTH token:** put it in **Password** and leave **Username** blank. **RBAC user:** fill both.
+- **Cluster mode enabled** (and Serverless): tick **Cluster mode** and use the *configuration endpoint* as host. Redash must be able to reach every node in the VPC.
+- **Serverless:** it needs both **Use TLS** and **Cluster mode**.
+- **Cluster mode disabled:** use the *primary endpoint*, with Cluster mode off.
+- In cluster mode a command runs on the node that owns its key. Multi-key commands (`MGET a b`) need all keys in one slot, for example `{user}:a` and `{user}:b`. Commands without a key (`DBSIZE`, `SCAN`, `INFO`) run on one node only.
+- ElastiCache blocks some commands (`CONFIG` and `DEBUG` among them). You get Redis's own error for those.
 
 ## Writing queries
 

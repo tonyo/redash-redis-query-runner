@@ -27,12 +27,31 @@ logger = logging.getLogger(__name__)
 _RAW_REPLY_COMMANDS = ("OBJECT", "COMMAND")
 
 
-def new_client(**kwargs: str | int | bool | None) -> redis.Redis:
-    """Build the redis-py client. A seam: unit tests patch this to return a fake."""
-    client = redis.Redis(**kwargs)
+def _drop_callbacks(client: redis.Redis) -> redis.Redis:
     for name in _RAW_REPLY_COMMANDS:
         client.response_callbacks.pop(name, None)
     return client
+
+
+class _RawReplyCluster(redis.RedisCluster):
+    """A cluster client whose per-node clients (which parse the replies) also give raw replies."""
+
+    def __init__(self, **kwargs: str | int | bool | None) -> None:
+        self._raw_replies = False  # the client itself needs the parsed COMMAND reply to start up
+        super().__init__(**kwargs)
+        self._raw_replies = True
+
+    def get_redis_connection(self, node: redis.cluster.ClusterNode) -> redis.Redis:
+        client = super().get_redis_connection(node)
+        return _drop_callbacks(client) if self._raw_replies else client
+
+
+def new_client(**kwargs: str | int | bool | None) -> redis.Redis | redis.RedisCluster:
+    """Build the redis-py client; `cluster=True` builds a cluster client. A seam: unit tests
+    patch this to return a fake."""
+    if kwargs.pop("cluster", False):
+        return _RawReplyCluster(**kwargs)
+    return _drop_callbacks(redis.Redis(**kwargs))
 
 
 class Redis(BaseQueryRunner):
@@ -71,6 +90,14 @@ class Redis(BaseQueryRunner):
                     "title": "Request timeout (seconds)",
                     "default": DEFAULT_REQUEST_TIMEOUT,
                 },
+                "ssl": {
+                    "type": "boolean",
+                    "title": "Use TLS (e.g. ElastiCache in-transit encryption)",
+                },
+                "cluster": {
+                    "type": "boolean",
+                    "title": "Cluster mode (use the configuration endpoint as host)",
+                },
             },
             "order": [
                 "host",
@@ -80,6 +107,8 @@ class Redis(BaseQueryRunner):
                 "password",
                 "connect_timeout",
                 "request_timeout",
+                "ssl",
+                "cluster",
             ],
             "required": ["host"],
             "secret": ["password"],
@@ -90,17 +119,19 @@ class Redis(BaseQueryRunner):
         placeholders)."""
         return Settings.from_config(self.configuration)
 
-    def _connect(self) -> redis.Redis:
+    def _connect(self) -> redis.Redis | redis.RedisCluster:
         settings = self._settings()
         return new_client(
             host=settings.host,
             port=settings.port,
-            db=settings.db,
             username=settings.username,
             password=settings.password,
             decode_responses=True,
             socket_connect_timeout=settings.connect_timeout,
             socket_timeout=settings.request_timeout,
+            ssl=settings.ssl,
+            # a cluster client rejects db; Settings guarantees it is 0 in cluster mode
+            **({"cluster": True} if settings.cluster else {"db": settings.db}),
         )
 
     # -- errors
@@ -119,6 +150,8 @@ class Redis(BaseQueryRunner):
             msg = f"Could not connect to Redis at {where}: {e}"
         elif isinstance(e, redis.ResponseError):
             msg = f"Redis error: {e}"
+        elif isinstance(e, redis.exceptions.RedisClusterException):  # not a RedisError
+            msg = f"Redis cluster error at {where}: {e}"
         elif isinstance(e, redis.RedisError):
             msg = f"Redis client error ({type(e).__name__}): {e}"
         elif isinstance(e, UnicodeDecodeError):
@@ -129,10 +162,16 @@ class Redis(BaseQueryRunner):
             msg = msg.replace(settings.password, "***")
         return msg
 
-    _HANDLED = (QueryError, ConfigError, redis.RedisError, UnicodeDecodeError)
+    _HANDLED = (
+        QueryError,
+        ConfigError,
+        redis.RedisError,
+        redis.exceptions.RedisClusterException,
+        UnicodeDecodeError,
+    )
 
     @contextmanager
-    def _client(self) -> Generator[redis.Redis]:
+    def _client(self) -> Generator[redis.Redis | redis.RedisCluster]:
         client = self._connect()
         try:
             yield client

@@ -73,7 +73,11 @@ def test_schema_contents():
         "password",
         "connect_timeout",
         "request_timeout",
+        "ssl",
+        "cluster",
     }
+    assert set(s["order"]) == set(s["properties"])
+    assert s["properties"]["ssl"]["type"] == s["properties"]["cluster"]["type"] == "boolean"
     assert s["required"] == ["host"]
     assert s["secret"] == ["password"]
     assert s["order"][:5] == ["host", "port", "db", "username", "password"]
@@ -191,6 +195,58 @@ def test_invalid_config_reported_even_for_a_bad_query(patched):
     patched(FakeRedis("x"))
     _, error = Redis({"host": "h", "port": "abc"}).run_query("", None)
     assert error  # a parse error or a config error, never a crash
+
+
+@pytest.mark.parametrize(
+    "cfg, expected",
+    [
+        ({"host": "h"}, (False, False)),
+        ({"host": "h", "ssl": None, "cluster": ""}, (False, False)),
+        ({"host": "h", "ssl": True}, (True, False)),
+        ({"host": "h", "ssl": True, "cluster": True}, (True, True)),
+    ],
+)
+def test_tls_and_cluster_are_passed_to_the_client(patched, cfg, expected):
+    client = FakeRedis("x")
+    patched(client)
+    Redis(cfg).run_query("GET k", None)
+    kw = client.kwargs
+    assert (kw["ssl"], kw.get("cluster", False)) == expected
+    assert ("db" in kw) is not expected[1]  # a cluster client must not be given db
+
+
+@pytest.mark.parametrize(
+    "cfg, fragment",
+    [
+        ({"host": "h", "ssl": "yes"}, "Invalid TLS"),
+        ({"host": "h", "cluster": 1}, "Invalid cluster mode"),
+        ({"host": "h", "cluster": True, "db": 2}, "cluster mode only has database 0"),
+    ],
+)
+def test_bad_tls_or_cluster_config_is_a_config_error(patched, cfg, fragment):
+    client = FakeRedis("x")
+    patched(client)
+    result, error = Redis(cfg).run_query("GET k", None)
+    assert result is None
+    assert fragment in error
+    assert client.kwargs is None  # never connected
+
+
+def test_cluster_connection_failure_is_described(patched):
+    exc = redis.exceptions.RedisClusterException("Redis Cluster cannot be connected")
+    patched(FakeRedis(exc))
+    result, error = Redis({"host": "h", "cluster": True}).run_query("GET k", None)
+    assert result is None
+    assert error == "Redis cluster error at h:6379: Redis Cluster cannot be connected"
+    with pytest.raises(Exception, match="Redis cluster error at h:6379"):
+        Redis({"host": "h", "cluster": True}).test_connection()
+
+
+def test_new_client_builds_a_cluster_client_on_request(monkeypatch):
+    built = []
+    monkeypatch.setattr(runner_mod, "_RawReplyCluster", lambda **kw: built.append(kw) or "c")
+    assert runner_mod.new_client(cluster=True, host="h") == "c"
+    assert built == [{"host": "h"}]  # `cluster` is consumed, not passed on
 
 
 def test_client_options_are_fixed(patched):

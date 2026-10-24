@@ -52,6 +52,15 @@ def _as_text(name: str, value: object, default: str | None, *, strip: bool = Tru
     return value or default
 
 
+def _as_bool(name: str, value: object) -> bool:
+    """Config value -> bool. Unset/blank -> False; anything but a boolean raises."""
+    if _is_blank(value):
+        return False
+    if not isinstance(value, bool):
+        raise ConfigError(f"Invalid {name}: not a yes/no value")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """The validated connection settings, with defaults applied."""
@@ -63,13 +72,19 @@ class Settings:
     password: str | None
     connect_timeout: int
     request_timeout: int
+    ssl: bool
+    cluster: bool
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "Settings":
+        db = _as_int("database index", config.get("db"), DEFAULT_DB, 0, 2**31 - 1)
+        cluster = _as_bool("cluster mode", config.get("cluster"))
+        if cluster and db:
+            raise ConfigError("Invalid database index: cluster mode only has database 0")
         return cls(
             host=_as_text("host", config.get("host"), DEFAULT_HOST) or DEFAULT_HOST,
             port=_as_int("port", config.get("port"), DEFAULT_PORT, 1, 65535),
-            db=_as_int("database index", config.get("db"), DEFAULT_DB, 0, 2**31 - 1),
+            db=db,
             username=_as_text("username", config.get("username"), None),
             password=_as_text("password", config.get("password"), None, strip=False),
             connect_timeout=_as_int(
@@ -86,4 +101,6 @@ class Settings:
                 1,
                 MAX_REQUEST_TIMEOUT,
             ),
+            ssl=_as_bool("TLS", config.get("ssl")),
+            cluster=cluster,
         )
