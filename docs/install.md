@@ -23,12 +23,11 @@ The runner is a Python package (`runner/redis_query_runner/`) with no dependenci
 [`docs/examples/Dockerfile`](examples/Dockerfile) builds stock Redash plus the runner and the Redis icon. BuildKit fetches the extension from GitHub, so the only file you need is that Dockerfile.
 
 ```sh
-docker build -t my-redash:26.9.0 --build-arg EXTENSION_REF=<tag-or-sha> .
+docker build -t redash-redis:26.9.0 --build-arg REDIS_RUNNER_REF=<tag-or-sha> .
 ```
 
-- `EXTENSION_REF` is a tag, branch or commit SHA. Pin a tag or SHA: `main` moves, so rebuilds would differ.
+- `REDIS_RUNNER_REF` is a tag, branch or commit SHA. Pin a tag or SHA: `main` moves, so rebuilds would differ.
 - `REDASH_VERSION` picks the base image (default `26.9.0`, the tested version).
-- While the repository is private, pass a token that can read it: `--secret id=GIT_AUTH_TOKEN,env=GH_TOKEN`.
 - Use the resulting image for every Redash service (`server`, `worker`, `scheduler`, and the one-off `create_db` job). The image sets `PYTHONPATH` and `REDASH_ADDITIONAL_QUERY_RUNNERS` itself, so no volume or extra env var is needed.
 
 ## Check it worked
