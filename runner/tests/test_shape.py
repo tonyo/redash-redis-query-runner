@@ -628,3 +628,49 @@ def test_datetime_cell_is_iso_text():
 
     r = shape(datetime(2026, 10, 23, 22, 44, 40), ("LASTSAVE",))
     assert r["rows"] == [{"value": "2026-10-23T22:44:40"}]
+
+
+# --- hash field expiration: HGETEX, HTTL, HPTTL, HEXPIRETIME, HPEXPIRETIME ------
+def test_hgetex_is_field_value_rows():
+    r = shape(["1", None, "x"], ("HGETEX", "h", "EX", "100", "FIELDS", "3", "a", "gone", "c"))
+    assert [c["name"] for c in r["columns"]] == ["field", "value"]
+    assert r["rows"] == [
+        {"field": "a", "value": "1"},
+        {"field": "gone", "value": None},
+        {"field": "c", "value": "x"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "command, column",
+    [
+        ("HTTL", "ttl"),
+        ("hpttl", "ttl"),
+        ("HEXPIRETIME", "expires_at"),
+        ("HPEXPIRETIME", "expires_at"),
+    ],
+)
+def test_per_field_expiry_commands(command, column):
+    r = shape([100, -1, -2], (command, "h", "fields", "3", "a", "b", "c"))
+    assert [c["name"] for c in r["columns"]] == ["field", column]
+    assert r["columns"][1]["type"] == "integer"
+    assert [(x["field"], x[column]) for x in r["rows"]] == [("a", 100), ("b", -1), ("c", -2)]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("HTTL", "h"),  # no FIELDS clause
+        ("HTTL", "h", "FIELDS", "2", "a"),  # fewer names than the count
+        ("HTTL", "h", "FIELDS", "x", "a"),  # count is not a number
+        ("HTTL", "FIELDS", "1", "a"),  # FIELDS is the key, not the clause
+    ],
+)
+def test_per_field_falls_back_when_args_do_not_line_up(args):
+    r = shape([1, 2], args)
+    assert [c["name"] for c in r["columns"]] == ["value"]
+
+
+def test_per_field_falls_back_when_reply_length_differs():
+    r = shape([1], ("HTTL", "h", "FIELDS", "2", "a", "b"))
+    assert [c["name"] for c in r["columns"]] == ["value"]

@@ -49,6 +49,7 @@ A bad value (for example port `abc`) gives an error message. A blank value uses 
 - **Serverless:** it needs both **Use TLS** and **Cluster mode**.
 - **Cluster mode disabled:** use the *primary endpoint*, with Cluster mode off.
 - In cluster mode a command runs on the node that owns its key. Multi-key commands (`MGET a b`) need all keys in one slot, for example `{user}:a` and `{user}:b`. Commands without a key (`DBSIZE`, `SCAN`, `INFO`) run on one node only.
+- **Valkey** 8 and 9 work like Redis, including ElastiCache for Valkey. Cluster mode only reaches database 0, even on Valkey 9 (redis-py's cluster client has no database option).
 - ElastiCache blocks some commands (`CONFIG` and `DEBUG` among them). You get Redis's own error for those.
 
 ## Writing queries

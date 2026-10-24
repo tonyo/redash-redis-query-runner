@@ -28,6 +28,7 @@ Row = dict[str, Any]
 Result = dict[str, Any]
 # redis-py replies are untyped: str, int, float, bool, None, list, tuple, dict, set.
 Reply = Any
+Shaper = Callable[[Reply, Sequence[Any]], Result | None]
 
 
 def _cell(v: Reply) -> Reply:
@@ -240,6 +241,32 @@ def _geopos(reply: Reply, args: Sequence[Any]) -> Result | None:
     return None
 
 
+def _hash_fields(args: Sequence[Any]) -> list[str] | None:
+    """The field names of ``... FIELDS n f1 .. fn`` (the hash field-expiration commands)."""
+    upper = _upper(args)
+    if "FIELDS" not in upper[2:]:
+        return None
+    at = upper.index("FIELDS", 2)
+    try:
+        count = int(args[at + 1])
+    except (IndexError, ValueError):
+        return None
+    names = [str(a) for a in args[at + 2 : at + 2 + count]]
+    return names if len(names) == count else None
+
+
+def _per_field(column: str) -> Shaper:
+    """A shaper for a command that answers one value per requested field, in order."""
+
+    def shaper(reply: Reply, args: Sequence[Any]) -> Result | None:
+        names = _hash_fields(args)
+        if names is None or not isinstance(reply, list) or len(reply) != len(names):
+            return None
+        return _table(["field", column], zip(names, reply, strict=True))
+
+    return shaper
+
+
 def _geo_search(reply: Reply, args: Sequence[Any]) -> Result | None:
     """GEOSEARCH / GEORADIUS with WITH* flags: [member, dist?, hash?, [lon, lat]?] per item."""
     flags = set(_upper(args))
@@ -302,8 +329,6 @@ def _client_list(reply: Reply, args: Sequence[Any]) -> Result | None:
     return _union_table(None, entries)
 
 
-Shaper = Callable[[Reply, Sequence[Any]], Result | None]
-
 # Keyed by the leading words of the command, upper-cased. A two-word key wins over a one-word one.
 _SHAPERS: dict[tuple[str, ...], Shaper] = {
     ("ZPOPMIN",): _zscores,
@@ -322,6 +347,11 @@ _SHAPERS: dict[tuple[str, ...], Shaper] = {
     ("ZSCAN",): _zscan,
     ("XREAD",): _xread,
     ("XREADGROUP",): _xread,
+    ("HGETEX",): _per_field("value"),
+    ("HTTL",): _per_field("ttl"),
+    ("HPTTL",): _per_field("ttl"),
+    ("HEXPIRETIME",): _per_field("expires_at"),
+    ("HPEXPIRETIME",): _per_field("expires_at"),
     ("GEOPOS",): _geopos,
     ("GEOSEARCH",): _geo_search,
     ("GEORADIUS",): _geo_search,
