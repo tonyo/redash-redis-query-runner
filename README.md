@@ -66,7 +66,7 @@ See [docs/queries.md](docs/queries.md) for quoting rules and for exactly which t
 
 ## Use it in your own Redash
 
-See [docs/install.md](docs/install.md). In short: mount the `runner/` folder into every Redash service, add it to `PYTHONPATH`, and set `REDASH_ADDITIONAL_QUERY_RUNNERS=redis_query_runner`.
+See [docs/install.md](docs/install.md). In short: mount the `runner/` folder into every Redash service, add it to `PYTHONPATH`, and set `REDASH_ADDITIONAL_QUERY_RUNNERS=redis_query_runner`. To bake it into your own image without cloning this repo, use the [example Dockerfile](docs/examples/Dockerfile).
 
 ## Security
 
@@ -78,8 +78,8 @@ See [docs/install.md](docs/install.md). In short: mount the `runner/` folder int
   ```
 
   Put that user in the **Username** and **Password** fields, and give the people who should only read the read-only data source. Keep a second data source with a write-capable login for the people who may write. `+@read` leaves out `INFO` and `CLIENT` (they are `@dangerous`), so those are added by name. `+select` is needed whenever the database index is not 0. Module commands (`JSON.*`, `TS.*`) are never in `+@read`: add them by name. The compose stack seeds a user `readonly` with password `readonly` and the demo adds a "(read-only)" data source for it.
-- **No TLS.** The connection is plain text. Keep it on a trusted network.
-- The compose file is for **local development**. Its secrets are random per checkout, but the Data Redis and Internal Redis have no password and the Redash port is open on all interfaces.
+- **TLS is optional and off by default.** With **Use TLS** off, the connection, including the password and every reply, is plain text: keep it on a trusted network. With it on, the server certificate is verified against the system CAs. There is no option for a private CA, a client certificate or skipping verification, so a server with a self-signed certificate can't be reached. TLS is covered by unit tests only, not against a live TLS server.
+- The compose file is for **local development**. Its secrets are random per checkout, but the Data Redis and Internal Redis have no password, the Data Redis is published on `127.0.0.1:6380` only, and the Redash port (5000) is open on all interfaces.
 
 ## Develop
 
@@ -103,6 +103,7 @@ Tests run in a container because the `redash` package can't be installed from Py
 
 ```
 runner/redis_query_runner/   the runner package
+  config.py                  data source settings and their validation
   parser.py                  query text -> command arguments
   shape.py                   Redis reply -> table (columns, types, rows)
   runner.py                  the Redash query runner class
