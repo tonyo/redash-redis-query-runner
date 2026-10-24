@@ -34,6 +34,9 @@ services:
   server:
     <<: *redash
     command: server
+    volumes:
+      - ./runner:/extensions:ro
+      - ./assets/redis.png:/app/client/dist/images/db-logos/redis.png:ro
     ports:
       - "5000:5000"
     environment:
